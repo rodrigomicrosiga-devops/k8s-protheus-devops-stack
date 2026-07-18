@@ -8,27 +8,27 @@ A stack adota isolamento completo de rede via Namespace e injeção dinâmica de
 
 ```mermaid
 graph TD
-    subgraph Máquina Física (Linux Mint)
-        DBeaver[DBeaver / pgAdmin] -- Túnel Local: 5432 --> K3D_LB
-        DBMonitor[TOTVS DBMonitor] -- Túnel Local: 7891 --> K3D_LB
+    subgraph M_FISICA["Máquina Física (Linux Mint)"]
+        DBeaver[DBeaver / pgAdmin] -- "Túnel Local: 5432" --> K3D_LB
+        DBMonitor[TOTVS DBMonitor] -- "Túnel Local: 7891" --> K3D_LB
     end
 
-    subgraph Cluster K3d (Namespace: protheus-devops)
+    subgraph CLUSTER["Cluster K3d (Namespace: protheus-devops)"]
         K3D_LB[K3d LoadBalancer / Port-Forward]
         
-        subgraph Camada de Conectividade
-            DBA_SVC[Service: dbaccess-service <br> NodePort: 30890] --> DBA_POD[Pod: DbAccess <br> v24.1.1.3]
+        subgraph DBA_LAYER["Camada de Conectividade"]
+            DBA_SVC["Service: dbaccess-service <br> NodePort: 30890"] --> DBA_POD["Pod: DbAccess <br> v24.1.1.3"]
         end
 
-        subgraph Camada de Persistência
-            PG_SVC[Service: postgres-service <br> Porta: 5432] --> PG_POD[Pod: PostgreSQL]
-            PG_POD --> PVC[PersistentVolumeClaim] --> PV[PersistentVolume <br> local-path: /media/rodrigo/dados/]
+        subgraph PG_LAYER["Camada de Persistência"]
+            PG_SVC["Service: postgres-service <br> Porta: 5432"] --> PG_POD["Pod: PostgreSQL"]
+            PG_POD --> PVC[PersistentVolumeClaim] --> PV["PersistentVolume <br> local-path: /media/rodrigo/dados/"]
         end
 
         %% Injeção de Variáveis
-        CM[ConfigMap: postgres-config <br> postgres.env] -. envFrom .-> DBA_POD
+        CM["ConfigMap: postgres-config <br> postgres.env"] -. envFrom .-> DBA_POD
         CM -. envFrom .-> PG_POD
-        SEC[Secret: postgres-secret <br> postgres-secret.env] -. envFrom .-> DBA_POD
+        SEC["Secret: postgres-secret <br> postgres-secret.env"] -. envFrom .-> DBA_POD
         SEC -. envFrom .-> PG_POD
         
         DBA_POD -- Conecta via TCP --> PG_SVC
