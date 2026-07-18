@@ -17,12 +17,17 @@ spec:
         - name: dbaccess
           image: rodrigomicrosiga/dbaccess-dev:24.1.1.3
           env:
+            # Endereço interno do cluster - fixo pois o serviço não muda de nome
             - name: DB_SERVER
               value: "postgres-service.protheus-devops.svc.cluster.local"
             - name: DB_PORT
               value: "5432"
-            - name: DB_DATABASE
-              value: "protheus_prod"
+          # Injeta dinamicamente TODAS as variáveis dos arquivos locais .env
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+            - secretRef:
+                name: postgres-secret
           ports:
             - containerPort: 7890
 ---
