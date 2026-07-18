@@ -1,0 +1,3 @@
+# Ignorar arquivos locais de ambiente dos desenvolvedores
+base/postgres.env
+base/postgres-secret.env
