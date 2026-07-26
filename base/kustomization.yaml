@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - postgres.yaml
   - dbaccess.yaml
+  - postgres-secret.sealed.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:
@@ -13,9 +14,6 @@ configMapGenerator:
     envs:
       - postgres.env
 
-# Gerador dinâmico de Secrets (senhas criptografadas em base64)
-secretGenerator:
-  - name: postgres-secret
-    namespace: protheus-devops
-    envs:
-      - postgres-secret.env
+# postgres-secret agora vem de postgres-secret.sealed.yaml (Sealed Secrets),
+# não mais de um secretGenerator local — o segredo real nunca fica em texto no git.
+# Requer o controller bitnami/sealed-secrets instalado no cluster de destino.

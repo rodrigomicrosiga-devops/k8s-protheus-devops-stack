@@ -1,3 +1,2 @@
-# Ignorar arquivos locais de ambiente dos desenvolvedores
-base/postgres.env
+# Segredo real: nunca vai puro pro git (usar SealedSecret, ver base/postgres-secret.sealed.yaml)
 base/postgres-secret.env
