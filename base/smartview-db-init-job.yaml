@@ -2,28 +2,13 @@
 # do docker-compose original, ramo "postgres" do init-smartview.sh). Roda uma vez
 # via hook PreSync do Argo CD -- não é um recurso pra ficar reconciliado
 # continuamente, e se autolimpa após concluir com sucesso.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: smartview-init-sql
-  namespace: protheus-devops
-data:
-  init-smartview.sql: |
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_setting('custom.sv_user', true)) THEN
-        EXECUTE format('CREATE USER %I WITH LOGIN ENCRYPTED PASSWORD %L', current_setting('custom.sv_user'), current_setting('custom.sv_pass'));
-      END IF;
-    END $$;
-
-    SELECT 'CREATE DATABASE ' || current_setting('custom.sv_dbname') || ' WITH OWNER=' || current_setting('custom.sv_user') || ' ENCODING=''UTF8'''
-    WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = current_setting('custom.sv_dbname')) \gexec
-
-    \c postgres
-    EXECUTE format('GRANT CONNECT ON DATABASE postgres TO %I', current_setting('custom.sv_user'));
-    EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', current_setting('custom.sv_user'));
-    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', current_setting('custom.sv_user'));
----
+#
+# O SQL vai embutido direto no script (heredoc) em vez de vir de um ConfigMap:
+# hooks PreSync rodam ANTES da fase de Sync principal, que é quando ConfigMaps
+# "normais" (não-hook) seriam criados -- um ConfigMap separado geraria um
+# deadlock (o Job nunca veria o recurso existir). SV_USER/SV_DBNAME pelo mesmo
+# motivo vão como valor literal (mesmos valores de base/smartview.env) em vez de
+# via configMapRef.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -44,6 +29,22 @@ spec:
           args:
             - |
               set -e
+              cat <<'SQL' > /tmp/init-smartview.sql
+              DO $$
+              BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_setting('custom.sv_user', true)) THEN
+                  EXECUTE format('CREATE USER %I WITH LOGIN ENCRYPTED PASSWORD %L', current_setting('custom.sv_user'), current_setting('custom.sv_pass'));
+                END IF;
+              END $$;
+
+              SELECT 'CREATE DATABASE ' || current_setting('custom.sv_dbname') || ' WITH OWNER=' || current_setting('custom.sv_user') || ' ENCODING=''UTF8'''
+              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = current_setting('custom.sv_dbname')) \gexec
+
+              \c postgres
+              EXECUTE format('GRANT CONNECT ON DATABASE postgres TO %I', current_setting('custom.sv_user'));
+              EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', current_setting('custom.sv_user'));
+              EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', current_setting('custom.sv_user'));
+              SQL
               echo "Aguardando o Postgres do cluster ficar disponivel..."
               until psql -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" > /dev/null 2>&1; do
                 sleep 2
@@ -51,28 +52,23 @@ spec:
               echo "Provisionando banco/usuario do SmartView..."
               psql -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
                 -c "SET custom.sv_user = '$SV_USER'; SET custom.sv_pass = '$SV_PASS'; SET custom.sv_dbname = '$SV_DBNAME';" \
-                -f /opt/smartview_init/init-smartview.sql
+                -f /tmp/init-smartview.sql
               echo "SmartView provisionado com sucesso."
           envFrom:
             - configMapRef:
                 name: postgres-config
-            - configMapRef:
-                name: smartview-config
           env:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
                   key: POSTGRES_PASSWORD
+            - name: SV_USER
+              value: totvs
+            - name: SV_DBNAME
+              value: smartview_dev
             - name: SV_PASS
               valueFrom:
                 secretKeyRef:
                   name: smartview-secret
                   key: SV_PASS
-          volumeMounts:
-            - name: init-sql
-              mountPath: /opt/smartview_init
-      volumes:
-        - name: init-sql
-          configMap:
-            name: smartview-init-sql
