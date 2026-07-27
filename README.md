@@ -34,6 +34,11 @@ graph TD
             PRINTER_POD["Pod: Printer <br> v3.0.5"] --> PRINTER_PVC["PVC: printer-shared-pvc"]
         end
 
+        subgraph SV_LAYER["Camada de Relatórios"]
+            SV_SVC["Service: smartview-service <br> NodePort: 30719 / 30717"] --> SV_POD["Pod: SmartView <br> v3.9.0 (privileged, systemd PID 1)"]
+            SV_JOB["Job (hook PreSync): smartview-db-init"] -.provisiona.-> PG_SVC
+        end
+
         %% Injeção de Variáveis
         CM["ConfigMap: postgres-config <br> postgres.env"] -. envFrom .-> DBA_POD
         CM -. envFrom .-> PG_POD
@@ -96,9 +101,21 @@ kubectl exec deployment/printer -n protheus-devops -- ls /mnt/printer_shared
 
 Esses dois PVCs ainda não têm consumidor: `base/appserver.yaml` (ainda incompleto/WIP, fora do escopo de automação atual) precisará montá-los como somente-leitura quando for finalizado, do mesmo jeito que o `docker-compose` original montava `webapp_shared_module` e `protheus_printer_volume` em `/tmp/webapp_shared:ro` e `/tmp/printer_shared:ro` dentro do `appserver_core`.
 
+6. Validar o TOTVS SmartView
+
+O bootstrap do banco/usuário do SmartView (`smartview_dev`/`totvs`) roda automaticamente como um **hook `PreSync` do Argo CD** (`smartview-db-init-job.yaml`) — dispara antes da sincronização do restante da stack e se autolimpa (`hook-delete-policy: HookSucceeded`) depois de concluir, não fica pendurado como um Job "morto" no namespace.
+
+```bash
+kubectl port-forward deployment/smartview 7019:7019 -n protheus-devops
+```
+
+A interface fica disponível em `http://localhost:7019`. A partir daí, a configuração da conexão com o dicionário de dados do Protheus (e qualquer outro ajuste) é feita manualmente pelo usuário, exatamente como já era feito ao subir via `run.sh` localmente — não é algo automatizado por este repositório. Essa configuração fica persistida inteiramente no banco `smartview_dev`, então um restart do Pod não perde nada.
+
+**Nota de segurança**: o Pod do `smartview` roda com `securityContext.privileged: true` e monta `/sys/fs/cgroup` do host (`hostPath`, `rw`) — escopo de acesso maior que o do `license` (que monta só o char device `/dev/mem`). Isso é necessário porque a imagem roda **systemd completo como PID 1** internamente (gerenciando o serviço `smart-view-agent`), e o systemd precisa administrar cgroups reais do host pra isso funcionar — o mesmo `--privileged` + `-v /sys/fs/cgroup:/sys/fs/cgroup:rw` que o próprio README da imagem Docker já documenta como pré-requisito. Não há endpoint HTTP de health documentado; a validação (liveness/readiness) é feita via probe `exec` rodando `systemctl is-active smart-view-agent.service` dentro do container, o mesmo comando usado manualmente pra validar a imagem antes desta automação.
+
 ### 🔄 GitOps: Argo CD + Image Updater
 
-Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev` e `printer-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
+Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev`, `printer-dev` e `smartview-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
 
 Os manifestos desses dois recursos (`Application` e `ImageUpdater`) ficam versionados em [`argocd/`](argocd/), pois eles vivem no namespace `argocd` do cluster, fora do que o Kustomize em `base/` gerencia — sem isso, a integração entre o Argo CD e este repositório existiria apenas como estado vivo do cluster, sem nenhum registro em git.
 
@@ -121,6 +138,6 @@ Todos os repositórios `docker-*` que alimentam este cluster publicam suas image
 
 ### 🔁 Estratégia de Rollout: `Recreate` nos componentes com volume `hostPath`
 
-`postgres`, `license`, `webapp` e `printer` usam `strategy.type: Recreate` em vez do `RollingUpdate` padrão do Kubernetes. Motivo: todos montam um volume `hostPath` (via PVC) ou dispositivo de host (`/dev/mem`, no caso do `license`) — diferente de volumes de rede, o `hostPath` não impede dois pods de acessarem o mesmo caminho simultaneamente, então o `RollingUpdate` pode deixar o pod antigo e o novo rodando ao mesmo tempo sobre os mesmos dados por um instante. Foi exatamente isso que causou um restart transitório do Postgres (`postmaster.pid` inconsistente) durante uma troca de imagem — sem perda de dados, mas o `Recreate` elimina esse risco: derruba o pod antigo por completo antes de subir o novo. `dbaccess` não usa nenhum volume, então continua com `RollingUpdate` (não há dado compartilhado em risco).
+`postgres`, `license`, `webapp`, `printer` e `smartview` usam `strategy.type: Recreate` em vez do `RollingUpdate` padrão do Kubernetes. Motivo: todos montam um volume `hostPath` (via PVC) ou dispositivo de host (`/dev/mem`, no caso do `license`) — diferente de volumes de rede, o `hostPath` não impede dois pods de acessarem o mesmo caminho simultaneamente, então o `RollingUpdate` pode deixar o pod antigo e o novo rodando ao mesmo tempo sobre os mesmos dados por um instante. Foi exatamente isso que causou um restart transitório do Postgres (`postmaster.pid` inconsistente) durante uma troca de imagem — sem perda de dados, mas o `Recreate` elimina esse risco: derruba o pod antigo por completo antes de subir o novo. `dbaccess` não usa nenhum volume, então continua com `RollingUpdate` (não há dado compartilhado em risco).
 
 

@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartview
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: smartview
+  template:
+    metadata:
+      labels:
+        app: smartview
+    spec:
+      containers:
+        - name: smartview
+          image: rodrigomicrosiga/smartview-dev:3.9.0
+          # Roda systemd como PID 1 internamente (gerencia o servico smart-view-agent).
+          # Para o systemd conseguir administrar cgroups, precisa de acesso privilegiado
+          # + o /sys/fs/cgroup real do host -- equivalente ao "--privileged" + "-v
+          # /sys/fs/cgroup:/sys/fs/cgroup:rw" documentado no proprio README da imagem.
+          # Escopo de acesso maior que o do license (que so monta /dev/mem, um unico
+          # char device) -- decisao confirmada explicitamente com o usuario antes de
+          # implementar (mesmo criterio ja usado pro tradeoff do license).
+          securityContext:
+            privileged: true
+          ports:
+            - containerPort: 7019
+            - containerPort: 7017
+          # Nao ha endpoint HTTP de health documentado -- o proprio README da imagem
+          # valida via `systemctl status smart-view-agent`. Probe exec e mais confiavel
+          # aqui do que adivinhar uma rota HTTP que pode nao existir.
+          livenessProbe:
+            exec:
+              command: ["systemctl", "is-active", "--quiet", "smart-view-agent.service"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["systemctl", "is-active", "--quiet", "smart-view-agent.service"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - mountPath: /sys/fs/cgroup
+              name: cgroup
+      volumes:
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+            type: Directory
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartview-service
+  namespace: protheus-devops
+spec:
+  type: NodePort
+  selector:
+    app: smartview
+  ports:
+    - name: agent
+      protocol: TCP
+      port: 7019
+      targetPort: 7019
+      nodePort: 30719
+    - name: secondary
+      protocol: TCP
+      port: 7017
+      targetPort: 7017
+      nodePort: 30717

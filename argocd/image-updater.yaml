@@ -44,3 +44,10 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/printer-dev
+        - alias: smartview
+          imageName: docker.io/rodrigomicrosiga/smartview-dev:3.9.0
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/smartview-dev

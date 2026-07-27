@@ -8,7 +8,10 @@ resources:
   - license.yaml
   - webapp.yaml
   - printer.yaml
+  - smartview.yaml
+  - smartview-db-init-job.yaml
   - postgres-secret.sealed.yaml
+  - smartview-secret.sealed.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:
@@ -16,6 +19,10 @@ configMapGenerator:
     namespace: protheus-devops
     envs:
       - postgres.env
+  - name: smartview-config
+    namespace: protheus-devops
+    envs:
+      - smartview.env
 
 # postgres-secret agora vem de postgres-secret.sealed.yaml (Sealed Secrets),
 # não mais de um secretGenerator local — o segredo real nunca fica em texto no git.
