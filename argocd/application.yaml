@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: protheus-devops-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/rodrigomicrosiga-devops/k8s-protheus-devops-stack.git
+    targetRevision: develop
+    path: base
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: protheus-devops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

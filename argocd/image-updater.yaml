@@ -1,0 +1,25 @@
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: protheus-devops-stack
+  namespace: argocd
+spec:
+  applicationRefs:
+    - namePattern: protheus-devops-stack
+      writeBackConfig:
+        method: argocd
+      images:
+        - alias: dbaccess
+          imageName: docker.io/rodrigomicrosiga/dbaccess-dev:24.1.1.3
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/dbaccess-dev
+        - alias: postgres
+          imageName: docker.io/rodrigomicrosiga/postgres-protheus-dev:16
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/postgres-protheus-dev
