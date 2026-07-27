@@ -24,6 +24,13 @@ spec:
           # (cap_add: SYS_RAWIO + devices: /dev/mem:/dev/mem), mas sem um device
           # plugin dedicado o Kubernetes só libera o cgroup de /dev/mem via
           # privileged: true.
+          #
+          # Exceção documentada à migração fleet-wide non-root (2026-07-27):
+          # testado em pod descartável -- mesmo com privileged:true e o usuário
+          # no grupo kmem (GID do dono de /dev/mem), o kernel nega leitura pra
+          # qualquer UID != 0 ("Operation not permitted"), proteção de hardening
+          # que ignora permissão de grupo/capabilities pra esse device. Continua
+          # root, mesmo tratamento dado ao systemd-as-PID1 do smartview.
           securityContext:
             privileged: true
           ports:
