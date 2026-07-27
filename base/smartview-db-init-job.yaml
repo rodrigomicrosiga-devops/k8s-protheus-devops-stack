@@ -6,9 +6,10 @@
 # O SQL vai embutido direto no script (heredoc) em vez de vir de um ConfigMap:
 # hooks PreSync rodam ANTES da fase de Sync principal, que é quando ConfigMaps
 # "normais" (não-hook) seriam criados -- um ConfigMap separado geraria um
-# deadlock (o Job nunca veria o recurso existir). SV_USER/SV_DBNAME pelo mesmo
-# motivo vão como valor literal (mesmos valores de base/smartview.env) em vez de
-# via configMapRef.
+# deadlock (o Job nunca veria o recurso existir). Pelo mesmo motivo,
+# POSTGRES_USER/POSTGRES_DB/SV_USER/SV_DBNAME vão como valor literal (mesmos
+# valores de base/postgres.env) em vez de via configMapRef -- o ConfigMap
+# postgres-config também só existe a partir da fase Sync.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -54,10 +55,11 @@ spec:
                 -c "SET custom.sv_user = '$SV_USER'; SET custom.sv_pass = '$SV_PASS'; SET custom.sv_dbname = '$SV_DBNAME';" \
                 -f /tmp/init-smartview.sql
               echo "SmartView provisionado com sucesso."
-          envFrom:
-            - configMapRef:
-                name: postgres-config
           env:
+            - name: POSTGRES_USER
+              value: totvs
+            - name: POSTGRES_DB
+              value: protheus
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
