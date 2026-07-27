@@ -43,7 +43,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: rodrigomicrosiga/postgres-protheus-dev:16
+          image: rodrigomicrosiga/postgres-dev:16
           imagePullPolicy: Always
           envFrom:
             - configMapRef:

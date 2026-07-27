@@ -17,12 +17,12 @@ spec:
             kustomize:
               name: rodrigomicrosiga/dbaccess-dev
         - alias: postgres
-          imageName: docker.io/rodrigomicrosiga/postgres-protheus-dev:16
+          imageName: docker.io/rodrigomicrosiga/postgres-dev:16
           commonUpdateSettings:
             updateStrategy: digest
           manifestTargets:
             kustomize:
-              name: rodrigomicrosiga/postgres-protheus-dev
+              name: rodrigomicrosiga/postgres-dev
         - alias: license
           imageName: docker.io/rodrigomicrosiga/license-dev:3.7.1
           commonUpdateSettings:
