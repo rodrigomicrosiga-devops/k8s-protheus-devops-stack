@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: license
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: license
+  template:
+    metadata:
+      labels:
+        app: license
+    spec:
+      containers:
+        - name: license
+          image: rodrigomicrosiga/license-dev:3.7.1
+          # Requer acesso privilegiado ao host: o dmidecode empacotado na imagem lê
+          # /dev/mem para gerar o fingerprint de hardware usado pela TOTVS para
+          # vincular a licença. Equivalente ao docker-compose original
+          # (cap_add: SYS_RAWIO + devices: /dev/mem:/dev/mem), mas sem um device
+          # plugin dedicado o Kubernetes só libera o cgroup de /dev/mem via
+          # privileged: true.
+          securityContext:
+            privileged: true
+          ports:
+            - containerPort: 5555
+            - containerPort: 8020
+          volumeMounts:
+            - mountPath: /dev/mem
+              name: dev-mem
+      volumes:
+        - name: dev-mem
+          hostPath:
+            path: /dev/mem
+            type: CharDevice
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: license-service
+  namespace: protheus-devops
+spec:
+  type: NodePort
+  selector:
+    app: license
+  ports:
+    - name: license
+      protocol: TCP
+      port: 5555
+      targetPort: 5555
+      nodePort: 30555
+    - name: monitor
+      protocol: TCP
+      port: 8020
+      targetPort: 8020
+      nodePort: 30820

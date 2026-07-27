@@ -20,6 +20,10 @@ graph TD
             DBA_SVC["Service: dbaccess-service <br> NodePort: 30890"] --> DBA_POD["Pod: DbAccess <br> v24.1.1.3"]
         end
 
+        subgraph LIC_LAYER["Camada de Licenciamento"]
+            LIC_SVC["Service: license-service <br> NodePort: 30555 / 30820"] --> LIC_POD["Pod: License Server <br> v3.7.1 (privileged)"]
+        end
+
         subgraph PG_LAYER["Camada de Persistência"]
             PG_SVC["Service: postgres-service <br> Porta: 5432"] --> PG_POD["Pod: PostgreSQL"]
             PG_POD --> PVC[PersistentVolumeClaim] --> PV["PersistentVolume <br> local-path: /media/rodrigo/dados/"]
@@ -68,9 +72,17 @@ Caso a porta nativa 7890 esteja ocupada por instâncias locais da máquina host,
 kubectl port-forward deployment/dbaccess 7891:7890 -n protheus-devops
 ```
 
+4. Validar o License Server
+
+```bash
+kubectl port-forward deployment/license 5555:5555 -n protheus-devops
+```
+
+**Nota de segurança**: o Pod do `license` roda com `securityContext.privileged: true` e monta `/dev/mem` do host (`hostPath`). Isso replica o `cap_add: SYS_RAWIO` + `devices: /dev/mem:/dev/mem` que o `docker-compose` original já usava — o binário da TOTVS (via `dmidecode`, empacotado na imagem) lê `/dev/mem` para gerar o fingerprint de hardware ao qual a licença é vinculada. Sem um device plugin dedicado, o Kubernetes só libera esse acesso via `privileged: true`. Como o node do K3d roda no mesmo host físico da máquina de desenvolvimento, o fingerprint resultante é o mesmo de quando a licença rodava via `docker-compose`.
+
 ### 🔄 GitOps: Argo CD + Image Updater
 
-Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev` e `postgres-protheus-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
+Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev`, `postgres-protheus-dev` e `license-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
 
 Os manifestos desses dois recursos (`Application` e `ImageUpdater`) ficam versionados em [`argocd/`](argocd/), pois eles vivem no namespace `argocd` do cluster, fora do que o Kustomize em `base/` gerencia — sem isso, a integração entre o Argo CD e este repositório existiria apenas como estado vivo do cluster, sem nenhum registro em git.
 

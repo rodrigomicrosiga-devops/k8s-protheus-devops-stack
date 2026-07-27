@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - postgres.yaml
   - dbaccess.yaml
+  - license.yaml
   - postgres-secret.sealed.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)

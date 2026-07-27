@@ -23,3 +23,10 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/postgres-protheus-dev
+        - alias: license
+          imageName: docker.io/rodrigomicrosiga/license-dev:3.7.1
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/license-dev
