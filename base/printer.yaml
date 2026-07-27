@@ -1,0 +1,59 @@
+# Sidecar de entrega: não expõe porta nenhuma, só extrai o binário do Printer
+# (versão independente, atualizável sem tocar no AppServer) para um volume
+# compartilhado. Quando base/appserver.yaml for finalizado, ele deve montar
+# este mesmo PVC (printer-shared-pvc) como somente-leitura, ex.: em
+# /totvs/appserver/printer — espelhando o /tmp/printer_shared:ro do
+# docker-compose original.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: printer-shared-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/printer-shared
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: printer-shared-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: printer-shared-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: printer
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: printer
+  template:
+    metadata:
+      labels:
+        app: printer
+    spec:
+      containers:
+        - name: printer
+          image: rodrigomicrosiga/printer-dev:3.0.5
+          volumeMounts:
+            - mountPath: /mnt/printer_shared
+              name: printer-shared
+      volumes:
+        - name: printer-shared
+          persistentVolumeClaim:
+            claimName: printer-shared-pvc

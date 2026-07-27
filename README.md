@@ -29,6 +29,11 @@ graph TD
             PG_POD --> PVC[PersistentVolumeClaim] --> PV["PersistentVolume <br> local-path: /media/rodrigo/dados/"]
         end
 
+        subgraph DELIVERY_LAYER["Camada de Entrega (Sidecars sem Service)"]
+            WEBAPP_POD["Pod: WebApp <br> v10.2.1"] --> WEBAPP_PVC["PVC: webapp-shared-pvc"]
+            PRINTER_POD["Pod: Printer <br> v3.0.5"] --> PRINTER_PVC["PVC: printer-shared-pvc"]
+        end
+
         %% Injeção de Variáveis
         CM["ConfigMap: postgres-config <br> postgres.env"] -. envFrom .-> DBA_POD
         CM -. envFrom .-> PG_POD
@@ -80,9 +85,20 @@ kubectl port-forward deployment/license 5555:5555 -n protheus-devops
 
 **Nota de segurança**: o Pod do `license` roda com `securityContext.privileged: true` e monta `/dev/mem` do host (`hostPath`). Isso replica o `cap_add: SYS_RAWIO` + `devices: /dev/mem:/dev/mem` que o `docker-compose` original já usava — o binário da TOTVS (via `dmidecode`, empacotado na imagem) lê `/dev/mem` para gerar o fingerprint de hardware ao qual a licença é vinculada. Sem um device plugin dedicado, o Kubernetes só libera esse acesso via `privileged: true`. Como o node do K3d roda no mesmo host físico da máquina de desenvolvimento, o fingerprint resultante é o mesmo de quando a licença rodava via `docker-compose`.
 
+5. `WebApp` e `Printer` (sidecars de entrega)
+
+`webapp` e `printer` são binários com versionamento independente do AppServer — cada um roda numa imagem exclusiva justamente para poder ser atualizado sozinho (nova versão do WebApp ou do Printer) sem precisar rebuildar ou reiniciar o AppServer. Eles não expõem porta nenhuma: o único trabalho de cada um é extrair seu binário para um `PersistentVolumeClaim` dedicado (`webapp-shared-pvc`, `printer-shared-pvc`) e ficar em standby. Não há verificação via `port-forward` aqui — a validação é conferir que os arquivos foram extraídos:
+
+```bash
+kubectl exec deployment/webapp -n protheus-devops -- ls /mnt/webapp_shared
+kubectl exec deployment/printer -n protheus-devops -- ls /mnt/printer_shared
+```
+
+Esses dois PVCs ainda não têm consumidor: `base/appserver.yaml` (ainda incompleto/WIP, fora do escopo de automação atual) precisará montá-los como somente-leitura quando for finalizado, do mesmo jeito que o `docker-compose` original montava `webapp_shared_module` e `protheus_printer_volume` em `/tmp/webapp_shared:ro` e `/tmp/printer_shared:ro` dentro do `appserver_core`.
+
 ### 🔄 GitOps: Argo CD + Image Updater
 
-Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev`, `postgres-protheus-dev` e `license-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
+Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev`, `postgres-protheus-dev`, `license-dev`, `webapp-dev` e `printer-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
 
 Os manifestos desses dois recursos (`Application` e `ImageUpdater`) ficam versionados em [`argocd/`](argocd/), pois eles vivem no namespace `argocd` do cluster, fora do que o Kustomize em `base/` gerencia — sem isso, a integração entre o Argo CD e este repositório existiria apenas como estado vivo do cluster, sem nenhum registro em git.
 

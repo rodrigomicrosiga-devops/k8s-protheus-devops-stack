@@ -30,3 +30,17 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/license-dev
+        - alias: webapp
+          imageName: docker.io/rodrigomicrosiga/webapp-dev:10.2.1
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/webapp-dev
+        - alias: printer
+          imageName: docker.io/rodrigomicrosiga/printer-dev:3.0.5
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/printer-dev

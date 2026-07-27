@@ -1,0 +1,59 @@
+# Sidecar de entrega: não expõe porta nenhuma, só extrai o binário do WebApp
+# (versão independente, atualizável sem tocar no AppServer) para um volume
+# compartilhado. Quando base/appserver.yaml for finalizado, ele deve montar
+# este mesmo PVC (webapp-shared-pvc) como somente-leitura, ex.: em
+# /totvs/appserver/webapp — espelhando o /tmp/webapp_shared:ro do
+# docker-compose original.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: webapp-shared-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/webapp-shared
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: webapp-shared-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: webapp-shared-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: webapp
+          image: rodrigomicrosiga/webapp-dev:10.2.1
+          volumeMounts:
+            - mountPath: /mnt/webapp_shared
+              name: webapp-shared
+      volumes:
+        - name: webapp-shared
+          persistentVolumeClaim:
+            claimName: webapp-shared-pvc
