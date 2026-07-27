@@ -63,6 +63,13 @@ spec:
       containers:
         - name: printer
           image: rodrigomicrosiga/printer-dev:3.0.5
+          # Só readiness, sem liveness: se nada foi provisionado, reiniciar o
+          # container não resolve (o entrypoint roda uma vez só).
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "find /mnt/printer_shared -mindepth 1 -print -quit | grep -q ."]
+            initialDelaySeconds: 10
+            periodSeconds: 15
           volumeMounts:
             - mountPath: /mnt/printer_shared
               name: printer-shared

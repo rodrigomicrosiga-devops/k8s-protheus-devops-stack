@@ -63,6 +63,14 @@ spec:
       containers:
         - name: webapp
           image: rodrigomicrosiga/webapp-dev:10.2.1
+          # Só readiness, sem liveness: se o arquivo não foi provisionado,
+          # reiniciar o container não resolve (o entrypoint roda uma vez só
+          # e não falha se o instalador não tiver o webapp.so).
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/mnt/webapp_shared/webapp.so"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
           volumeMounts:
             - mountPath: /mnt/webapp_shared
               name: webapp-shared
