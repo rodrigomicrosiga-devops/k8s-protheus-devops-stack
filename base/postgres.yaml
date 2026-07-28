@@ -11,6 +11,15 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   hostPath:
     path: /media/rodrigo/dados/k8s-volume/postgres
+  # NOTA: este PV já roda com nodeAffinity fixando-o no agent-0 (aplicado
+  # uma única vez, fora do fluxo do Argo CD, em 2026-07-28). Não é
+  # declarado aqui porque spec.nodeAffinity de um PV já existente é
+  # IMUTÁVEL no Kubernetes -- toda tentativa do Argo CD de sincronizar essa
+  # mudança falha com "field is immutable, except for updating from beta
+  # label to GA", mesmo quando o valor já bate. Declará-lo em git faria
+  # esse recurso ficar permanentemente com falha de sync. PVs criados do
+  # zero (ver protheus-seed.yaml) não têm esse problema, pois a
+  # nodeAffinity nasce junto com o recurso.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

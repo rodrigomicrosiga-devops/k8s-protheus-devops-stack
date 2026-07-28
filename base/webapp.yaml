@@ -17,6 +17,10 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   hostPath:
     path: /media/rodrigo/dados/k8s-volume/webapp-shared
+  # NOTA: mesmo tratamento do postgres-pv (ver comentário lá) -- este PV já
+  # roda com nodeAffinity fixando-o no agent-0, aplicada uma única vez fora
+  # do fluxo do Argo CD, porque o campo é imutável em PVs já existentes e
+  # declará-lo aqui deixaria o recurso permanentemente com falha de sync.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

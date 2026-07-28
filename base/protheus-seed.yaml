@@ -1,0 +1,187 @@
+# ==============================================================================
+# Volumes do AppServer (apo/system/systemload/data/log) + imagens seed que os
+# provisionam. Todo pod deste stack roda hoje no agent-0 por acaso do
+# escalonador -- os PVs abaixo fixam isso explicitamente via nodeAffinity,
+# porque os dados reais vivem dentro do node (não no disco físico, ver nota
+# em webapp.yaml/printer.yaml) e um pod agendado no node errado subiria com
+# os volumes vazios.
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-apo-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 3Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-apo
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-apo-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 3Gi
+  volumeName: protheus-apo-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-system-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-system
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-system-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: protheus-system-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-systemload-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-systemload
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-systemload-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  volumeName: protheus-systemload-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-data-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-data-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: protheus-data-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-log-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-log
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-log-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: protheus-log-pv

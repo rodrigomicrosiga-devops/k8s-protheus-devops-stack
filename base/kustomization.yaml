@@ -8,6 +8,7 @@ resources:
   - license.yaml
   - webapp.yaml
   - printer.yaml
+  - protheus-seed.yaml
   - smartview.yaml
   - smartview-db-init-job.yaml
   - postgres-secret.sealed.yaml
