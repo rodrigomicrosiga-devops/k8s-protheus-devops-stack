@@ -13,6 +13,7 @@ resources:
   - smartview-db-init-job.yaml
   - postgres-secret.sealed.yaml
   - smartview-secret.sealed.yaml
+  - regcred.sealed.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:
