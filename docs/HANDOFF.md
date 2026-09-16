@@ -4,7 +4,26 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-16)
+## Onde paramos (2026-09-16, atualização ao vivo)
+
+**Crashloop do `protheus_core` resolvido** — causa raiz era o banco `protheus_dev` continuar no
+estado poluído de 30/07 (17 tabelas indevidas), não memória nem CPU/cgroup (ambas testadas e
+descartadas). Confirmado empiricamente apontando um container efêmero para um banco novo/vazio:
+a camada HTTP interna subiu limpa lá, e falhava sempre contra o `protheus_dev` poluído. Fix:
+wipe real (`DROP DATABASE` + `CREATE DATABASE protheus_dev OWNER totvs TEMPLATE template0
+ENCODING 'WIN1252' LC_COLLATE 'C' LC_CTYPE 'pt_BR.CP1252'` — mesma spec do `init-protheus.sh`),
+exatamente o passo que já estava combinado desde 30/07. `core` subiu uma única vez, estável,
+`1234`/`32033` respondendo — parado aí, aguardando bootstrap manual do usuário.
+
+**Achado que precisa de atenção do usuário, não resolvido/interpretado por mim**: mesmo nesse
+boot único e limpo, sem qualquer restart, o log já mostra
+`Table SYS_APP_PARAM : Unable to Unregister Fields` e o banco já criou 1 tabela sozinho
+(`SYS_APP_PARAM` — uma das 17 que a sessão de 30/07 marcou como indevida). Isso sugere que a
+causa daquela poluição pode não ter sido exclusivamente os restarts múltiplos do `core` — o
+framework parece criar esse baseline em qualquer primeiro boot. Fica registrado para o usuário
+avaliar quando ele validar o banco/dbaccess/SmartClient.
+
+## Onde paramos (histórico da retomada)
 
 Handoff recuperado depois de ~6 semanas parado (última sessão real: 2026-07-30/31). A causa do
 "sumiço" foi estrutural, não de conteúdo: a memória do Claude Code é indexada por diretório de
