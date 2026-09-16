@@ -14,6 +14,9 @@ resources:
   - postgres-secret.sealed.yaml
   - smartview-secret.sealed.yaml
   - regcred.sealed.yaml
+  # appserver-rest.yaml e appserver-telnet.yaml entram na Fase D, depois do
+  # core validado em produção real -- não registrar ainda (docs/HANDOFF.md).
+  - appserver-core.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:

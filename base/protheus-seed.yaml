@@ -185,3 +185,125 @@ spec:
     requests:
       storage: 1Gi
   volumeName: protheus-log-pv
+# ==============================================================================
+# Seeds: provisionam os artefatos proprietários (RPO, fiscal/menus, dicionários)
+# dentro dos volumes acima. Imagens privadas (regcred), entrypoints idempotentes
+# por arquivo-marcador (nunca reprovisionam sobre uma release já marcada -- ver
+# READMEs de docker-protheus-{rpo,system,systemload}), terminam em
+# `tail -f /dev/null` -- ficam de pé em standby, governados pelo Image Updater
+# por digest, não são Jobs.
+# ==============================================================================
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: protheus-rpo-seed
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: protheus-rpo-seed
+  template:
+    metadata:
+      labels:
+        app: protheus-rpo-seed
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      # A imagem roda como usuário não-root `protheus`; o kubelet cria o
+      # hostPath como root:root 0755 na primeira vez que o Pod é agendado --
+      # mesmo tratamento de base/webapp.yaml/printer.yaml.
+      initContainers:
+        - name: fix-shared-volume-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chmod 0777 /mnt/apo"]
+          volumeMounts:
+            - mountPath: /mnt/apo
+              name: protheus-apo
+      containers:
+        - name: protheus-rpo-seed
+          image: rodrigomicrosiga/protheus-rpo-dev:12.1.2510
+          volumeMounts:
+            - mountPath: /mnt/apo
+              name: protheus-apo
+      volumes:
+        - name: protheus-apo
+          persistentVolumeClaim:
+            claimName: protheus-apo-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: protheus-system-seed
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: protheus-system-seed
+  template:
+    metadata:
+      labels:
+        app: protheus-system-seed
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      initContainers:
+        - name: fix-shared-volume-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chmod 0777 /mnt/system"]
+          volumeMounts:
+            - mountPath: /mnt/system
+              name: protheus-system
+      containers:
+        - name: protheus-system-seed
+          image: rodrigomicrosiga/protheus-system-dev:12.1.2510
+          volumeMounts:
+            - mountPath: /mnt/system
+              name: protheus-system
+      volumes:
+        - name: protheus-system
+          persistentVolumeClaim:
+            claimName: protheus-system-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: protheus-systemload-seed
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: protheus-systemload-seed
+  template:
+    metadata:
+      labels:
+        app: protheus-systemload-seed
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      initContainers:
+        - name: fix-shared-volume-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chmod 0777 /mnt/systemload"]
+          volumeMounts:
+            - mountPath: /mnt/systemload
+              name: protheus-systemload
+      containers:
+        - name: protheus-systemload-seed
+          image: rodrigomicrosiga/protheus-systemload-dev:12.1.2510
+          volumeMounts:
+            - mountPath: /mnt/systemload
+              name: protheus-systemload
+      volumes:
+        - name: protheus-systemload
+          persistentVolumeClaim:
+            claimName: protheus-systemload-pvc

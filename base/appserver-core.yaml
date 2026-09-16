@@ -1,0 +1,154 @@
+# AppServer "core" -- o processo multiprotocolo principal do Protheus.
+# Substitui o antigo base/appserver.yaml (stub de 19/jul, nunca funcional).
+#
+# Não referencia ConfigMap de appserver.ini: o entrypoint da imagem gera o
+# .ini dinamicamente a partir das env vars abaixo, igual ao docker-compose
+# original -- não existe (nem deveria existir) um .ini gerenciado por fora.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: appserver-core
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: appserver-core
+  template:
+    metadata:
+      labels:
+        app: appserver-core
+    spec:
+      # "Sem os artefatos, nada existe": bloqueia o container principal até
+      # o RPO oficial estar de fato provisionado pelo seed (protheus-rpo-dev).
+      # Protege contra ordem de subida -- não assume que o seed já rodou.
+      initContainers:
+        - name: wait-for-rpo
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Aguardando RPO oficial em /totvs/protheus/apo/tttm120.rpo..."
+              until [ -s /totvs/protheus/apo/tttm120.rpo ]; do
+                sleep 5
+              done
+              echo "RPO presente, liberando o AppServer."
+          volumeMounts:
+            - mountPath: /totvs/protheus/apo
+              name: protheus-apo
+      containers:
+        - name: appserver-core
+          image: rodrigomicrosiga/appserver-dev:24.3.1.5
+          command: ["core"]
+          env:
+            - name: ENV_NAME
+              value: "protheus_dev"
+            - name: APP_PORT_MULTI
+              value: "1234"
+            - name: APP_MONITOR_PORT
+              value: "32033"
+            - name: LICENSE_SERVER
+              value: "license-service"
+            - name: LICENSE_SERVER_PORT
+              value: "5555"
+            - name: DBACCESS_SERVER
+              value: "dbaccess-service"
+            - name: DBACCESS_PORT
+              value: "7890"
+            # Fallback do entrypoint já é "custom" -- só existe aqui pra deixar
+            # o nome explícito e evitar o bug de nome de variável já corrigido
+            # em docker-protheus-appserver (CUSTOM_RPO_NAME x RPO_CUSTOM_NAME).
+            - name: RPO_CUSTOM_NAME
+              value: "custom"
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+          ports:
+            - containerPort: 1234
+              name: smartclient
+            - containerPort: 32033
+              name: monitor
+          readinessProbe:
+            tcpSocket:
+              port: 1234
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 1234
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          # Sem securityContext/privileged por enquanto: diferente do license
+          # (ADR 0001), o core não faz fingerprint de hardware -- só age como
+          # client TCP do license server. cap_add/SYS_RAWIO + /dev/mem do
+          # docker-compose original ficam de fora até um teste real provar
+          # que são necessários (não decidir por analogia com o compose).
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              memory: "3Gi"
+          volumeMounts:
+            - mountPath: /totvs/protheus/apo
+              name: protheus-apo
+            - mountPath: /totvs/protheus/system
+              name: protheus-system
+            - mountPath: /totvs/protheus/systemload
+              name: protheus-systemload
+            - mountPath: /totvs/protheus/data
+              name: protheus-data
+            - mountPath: /totvs/protheus/log
+              name: protheus-log
+            - mountPath: /tmp/webapp_shared
+              name: webapp-shared
+              readOnly: true
+            - mountPath: /tmp/printer_shared
+              name: printer-shared
+              readOnly: true
+      volumes:
+        - name: protheus-apo
+          persistentVolumeClaim:
+            claimName: protheus-apo-pvc
+        - name: protheus-system
+          persistentVolumeClaim:
+            claimName: protheus-system-pvc
+        - name: protheus-systemload
+          persistentVolumeClaim:
+            claimName: protheus-systemload-pvc
+        - name: protheus-data
+          persistentVolumeClaim:
+            claimName: protheus-data-pvc
+        - name: protheus-log
+          persistentVolumeClaim:
+            claimName: protheus-log-pvc
+        - name: webapp-shared
+          persistentVolumeClaim:
+            claimName: webapp-shared-pvc
+        - name: printer-shared
+          persistentVolumeClaim:
+            claimName: printer-shared-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: appserver-core-service
+  namespace: protheus-devops
+spec:
+  type: NodePort
+  selector:
+    app: appserver-core
+  ports:
+    - name: smartclient
+      protocol: TCP
+      port: 1234
+      targetPort: 1234
+      nodePort: 31234
+    - name: monitor
+      protocol: TCP
+      port: 32033
+      targetPort: 32033
+      nodePort: 32033
