@@ -15,13 +15,30 @@ ENCODING 'WIN1252' LC_COLLATE 'C' LC_CTYPE 'pt_BR.CP1252'` — mesma spec do `in
 exatamente o passo que já estava combinado desde 30/07. `core` subiu uma única vez, estável,
 `1234`/`32033` respondendo — parado aí, aguardando bootstrap manual do usuário.
 
-**Achado que precisa de atenção do usuário, não resolvido/interpretado por mim**: mesmo nesse
-boot único e limpo, sem qualquer restart, o log já mostra
-`Table SYS_APP_PARAM : Unable to Unregister Fields` e o banco já criou 1 tabela sozinho
-(`SYS_APP_PARAM` — uma das 17 que a sessão de 30/07 marcou como indevida). Isso sugere que a
-causa daquela poluição pode não ter sido exclusivamente os restarts múltiplos do `core` — o
-framework parece criar esse baseline em qualquer primeiro boot. Fica registrado para o usuário
-avaliar quando ele validar o banco/dbaccess/SmartClient.
+**Achado intermediário, já explicado pelo segundo problema abaixo**: no primeiro boot pós-wipe
+(ainda com o `dbaccess` antigo no ar durante o `DROP DATABASE`), o log mostrava
+`Table SYS_APP_PARAM : Unable to Unregister Fields` e o banco criava algumas tabelas sozinho
+antes de qualquer acesso via SmartClient. Isso não era o comportamento normal do framework — era
+sintoma do problema seguinte.
+
+**Segundo problema real, encontrado pelo usuário e corrigido**: o `DROP DATABASE` foi feito com
+o `dbaccess` **ativo**, que mantém cache de metadados/DDL em memória por ambiente — ficou
+dessincronizado da realidade física do banco. Sintoma: `SYS_BCAST_KEYSTAGE: TOP Error -19 -
+Unable to Unregister Fields (ROP_CREATEFILE)` ao acessar `/webapp`. Fix aplicado (sequência do
+usuário, confirmada correta): parar `core` → parar `dbaccess` → `DROP DATABASE` → restart do
+container do Postgres → recriar o banco limpo → subir `dbaccess` → subir `core`. Sem cache em
+disco no `dbaccess` (só logs, sem volume montado) — reiniciar o container já era suficiente,
+sem precisar limpar nada a mais.
+
+**Regra operacional nova, adicionar a este handoff permanentemente**: **nunca fazer `DROP
+DATABASE`/DDL direto no Postgres com o `dbaccess` (ou qualquer client TOP) ativo** — sempre
+parar `dbaccess` antes de qualquer wipe de banco, e reiniciá-lo depois de recriar o banco.
+
+**Marco fechado (2026-09-16)**: bootstrap manual completo, sem erros — banco, dbaccess,
+dbaccess×banco e SmartClient HTML todos validados pelo usuário; login concluído, tabelas de
+dicionário criadas pelo próprio Protheus, sistema abriu normalmente. **Fim da Parte 1 do plano
+de retomada.** Próximo passo: Fase C no k3d (seeds + `appserver-core`), pulando o restante da
+bateria de QA local (rest/worker/telnet/MSSQL), conforme decisão já tomada nesta sessão.
 
 ## Onde paramos (histórico da retomada)
 
