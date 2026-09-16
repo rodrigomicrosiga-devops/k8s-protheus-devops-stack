@@ -75,7 +75,16 @@ para não perder mais tempo dado o estado do projeto.
 
 ## Backlog aberto, por prioridade
 
-1. **Bloqueador imediato**: crashloop do `protheus_core` no Compose (ver acima).
+0. **Alta prioridade, descoberto em 2026-09-16**: hostPaths do cluster (`postgres-pv` e os 5
+   PVs do AppServer, `webapp-shared-pv`, `printer-shared-pv`) não têm bind mount real do disco
+   físico — o node `agent-0` não monta `/media/rodrigo/dados` de jeito nenhum, os dados vivem só
+   na camada de container do node. `docker restart` é seguro; `k3d cluster delete`/recriação
+   apaga tudo (~50 dias de estado do cluster) sem possibilidade de recuperação. Ver
+   `docs/adr/0007-hostpath-sem-bind-mount-real.md` para o plano de correção (recriar o cluster
+   com bind mount real, migrando os dados atuais antes). **Nunca rodar `k3d cluster delete` sem
+   backup explícito até isso ser corrigido.**
+1. **Bloqueador imediato**: crashloop do `protheus_core` no Compose — **RESOLVIDO em 2026-09-16**,
+   ver "Onde paramos" acima.
 2. **Fase C (k3d)**: adicionar os 3 Deployments de seed a `protheus-seed.yaml`, registrar os 4
    manifestos `appserver*.yaml` em `base/kustomization.yaml`, deletar o stub morto
    `base/appserver.yaml`, adicionar `imagePullSecrets: [regcred]` onde falta (nenhum pod do
