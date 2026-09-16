@@ -37,8 +37,50 @@ parar `dbaccess` antes de qualquer wipe de banco, e reiniciá-lo depois de recri
 **Marco fechado (2026-09-16)**: bootstrap manual completo, sem erros — banco, dbaccess,
 dbaccess×banco e SmartClient HTML todos validados pelo usuário; login concluído, tabelas de
 dicionário criadas pelo próprio Protheus, sistema abriu normalmente. **Fim da Parte 1 do plano
-de retomada.** Próximo passo: Fase C no k3d (seeds + `appserver-core`), pulando o restante da
-bateria de QA local (rest/worker/telnet/MSSQL), conforme decisão já tomada nesta sessão.
+de retomada.**
+
+## Fase C (k3d) — DONE, aguardando bootstrap manual do usuário (2026-09-16)
+
+Compose local parado, k3d religado. **Correção importante de suposição**: o cluster já estava
+muito mais avançado do que os arquivos locais sugeriam — `postgres`/`dbaccess`/`license`/
+`webapp`/`printer`/`smartview` já rodavam há ~50 dias (desde a Fase B), e os PVs/PVCs do
+AppServer já estavam `Bound` (o `protheus-seed.yaml` já estava no `kustomization.yaml`, só
+faltavam os Deployments de seed em si). Ver `docs/adr/0007-hostpath-sem-bind-mount-real.md` para
+o risco de persistência descoberto nesse processo.
+
+Trabalho feito: os 3 Deployments de seed (`protheus-rpo-seed`, `protheus-system-seed`,
+`protheus-systemload-seed`) adicionados a `protheus-seed.yaml`, com `imagePullSecrets: regcred`
+e initContainer de chmod (padrão de `webapp.yaml`). `appserver-core.yaml` registrado no
+`kustomization.yaml`, com `resources` explícitos; `securityContext`/privileged deixados de fora
+(o core não faz fingerprint de hardware como o `license` — ADR 0001 — e não precisou disso na
+prática). `appserver.yaml` (stub morto de 19/jul) removido.
+
+**Bug real encontrado e corrigido nos 3 manifestos (core/rest/telnet)**: `command: ["core"]` no
+container spec do Kubernetes **substitui** o ENTRYPOINT da imagem (diferente do
+docker-compose, onde `command:` vira só o CMD/argumento do ENTRYPOINT) — o kubelet tentava
+executar um binário literal chamado `core`, inexistente (`RunContainerError`,
+`exec: "core": executable file not found in $PATH`). Corrigido para `args: ["core"]` nos 3
+arquivos (rest/telnet corrigidos preventivamente, ainda fora do `kustomization.yaml` — Fase D).
+
+**Validado ao vivo**: RPO com hash idêntico ao pristino (`568f185e...`, 671548215 bytes).
+`appserver-core` `Running`, `1/1 Ready`, `RESTARTS 0`, Application `Synced`/`Healthy`. Mesmo
+padrão do Compose: 7 tabelas de baseline (`sys_app_param` + `top_*`) já criadas sozinhas no
+primeiro boot, sem qualquer acesso via SmartClient ainda.
+
+**Acesso**: NodePorts (`31234`/`32033`) não estão publicados no host pelo k3d (só `6443` e
+`7890` são — confirmado via `k3d cluster list -o json`). Recriar o cluster pra expor isso é caro
+e arriscado dado o ADR 0007 (perderia os 50 dias de dados). Solução: `kubectl port-forward`,
+sem alterar nada do cluster:
+```
+kubectl port-forward -n protheus-devops deploy/appserver-core 1234:1234 32033:32033
+kubectl port-forward -n protheus-devops svc/postgres-service 5433:5432
+kubectl port-forward -n protheus-devops svc/dbaccess-service 7891:7890
+```
+
+**Parado aqui, aguardando o usuário** (mesma regra do bootstrap manual, agora para o banco
+`protheus` do cluster k8s — convenção de nome diferente do `protheus_dev` do Compose, ver
+`CLAUDE.md`): validar banco/dbaccess/dbaccess×banco, abrir `http://localhost:1234/webapp` e
+concluir o login inicial.
 
 ## Onde paramos (histórico da retomada)
 
