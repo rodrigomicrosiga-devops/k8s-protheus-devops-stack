@@ -52,10 +52,16 @@ em 2026-07-30 (detalhe completo em `docs/HANDOFF.md`). Sequência obrigatória:
 Não deixe `core` passar por múltiplos ciclos de boot/restart antes do passo 4 — isso é o que
 causou a poluição de 30/07.
 
-## Convenções que divergem de propósito
+## Convenções padronizadas (2026-09-16)
 
-- Nome do database: `protheus_dev` no Compose local × `protheus` no cluster k8s. Não são erro,
-  são convenções distintas por ambiente.
+- **Nome do banco, usuário e ambiente**: `protheus`/`protheus`/`protheus` por default, nos dois
+  ambientes (Compose local e cluster k8s). Isso **não era o caso antes** — o Compose usava
+  `totvs`/`totvs`/`protheus_dev` (drift acidental, não decisão deliberada) enquanto o cluster já
+  usava `protheus`/`totvs`/`protheus_dev` (banco certo, usuário e `ENV_NAME` errados). Corrigido
+  para ficar idêntico nos dois. Senha default: `ProtheusPwd2026`. Só muda se o dev realmente
+  configurar diferente — não reabrir essa padronização sem motivo novo.
+- **Restrição de senha**: não usar `;`, `=` nem aspas — o entrypoint do `dbaccess` injeta a
+  senha sem escaping numa `ConnectionString` delimitada por `;` (via `sed`) no `dbaccess.ini`.
 - Escopo de banco no cluster: **só Postgres**. MSSQL/Oracle ficam exclusivos do Compose local
   (decisão registrada em `docs/adr/`).
 

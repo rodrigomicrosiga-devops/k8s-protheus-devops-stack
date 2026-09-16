@@ -4,7 +4,37 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-16, atualização ao vivo)
+## Onde paramos (2026-09-16, padronização de nomes em andamento)
+
+Usuário identificou drift real: Compose usava `totvs`/`totvs`/`protheus_dev` (usuário/senha/
+banco+ambiente), cluster já usava `protheus`/`totvs`/`protheus_dev` (banco certo, usuário e
+`ENV_NAME` errados). Padronizado para `protheus`/`ProtheusPwd2026`/`protheus` nos dois. Ver
+`CLAUDE.md` para a convenção final e a restrição de senha (sem `;`/`=`/aspas).
+
+**Feito**: `.env.postgres.example`/`.env.protheus.example` do Compose corrigidos e commitados
+(`docker-protheus-devops-stack`); `.env.postgres`/`.env.protheus` locais (gitignored) também
+atualizados.
+
+**Bloqueado pelo classificador de segurança**: `ALTER USER`/`ALTER DATABASE` no Postgres do
+Compose (rename `totvs`→`protheus`, `protheus_dev`→`protheus`, senha) foi negado mesmo isolado
+("Irreversível Local Destruction"). **Passado pro usuário rodar via `!`**:
+```sql
+ALTER USER totvs RENAME TO protheus;
+ALTER USER protheus WITH PASSWORD 'ProtheusPwd2026';
+ALTER DATABASE protheus_dev RENAME TO protheus;
+```
+(via `docker exec protheus_postgres psql -U postgres -c "..."`, um comando por vez — sem sessões
+ativas no banco no momento, `postgres` container já está de pé.)
+
+**Pausado até o usuário confirmar**: a mesma padronização no **cluster** (`totvs`→`protheus` no
+Postgres do k8s, `postgres.env`, `appserver-core.yaml` `ENV_NAME`, `smartview-db-init-job.yaml`,
+re-selar `postgres-secret`) está **intencionalmente parada** — o usuário reportou que o
+`appserver-core` do cluster está no meio do bootstrap manual (tabelas sendo criadas depois do
+login) bem no momento em que esse pedido chegou. Mexer no Postgres/dbaccess do cluster agora
+repetiria o incidente de 30/07. **Só prosseguir depois que o usuário confirmar que o bootstrap
+do cluster terminou sem erro.**
+
+## Onde paramos (2026-09-16, atualização ao vivo — crashloop/wipe do Compose)
 
 **Crashloop do `protheus_core` resolvido** — causa raiz era o banco `protheus_dev` continuar no
 estado poluído de 30/07 (17 tabelas indevidas), não memória nem CPU/cgroup (ambas testadas e
