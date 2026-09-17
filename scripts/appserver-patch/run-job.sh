@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Orquestra um ciclo completo de worker/compile no cluster k8s, replicando a
-# "esteira elástica síncrona" do run.sh do Compose (ver
+# Orquestra um ciclo completo de worker/compile/upddistr no cluster k8s,
+# replicando a "esteira elástica síncrona" do run.sh do Compose (ver
 # docker-protheus-devops-stack/run.sh linhas 148-215): para core/rest/telnet,
 # roda o Job, religa o que estava ativo -- mesmo se o Job falhar.
 #
-# Uso: ./scripts/appserver-patch/run-job.sh worker|compile
+# Uso: ./scripts/appserver-patch/run-job.sh worker|compile|upddistr
 #
 # Pré-requisito pra worker: pelo menos um .ptm em
 #   /media/rodrigo/dados/k8s-volume/protheus-patches/
@@ -13,6 +13,9 @@
 # Pré-requisito pra compile: .prw/.tlpp reais em
 #   /media/rodrigo/dados/k8s-volume/protheus-patches/ -- compile FALHA se não
 # achar nenhum fonte (ao contrário do worker).
+# Pré-requisito pra upddistr: arquivos de atualização (SX*, *.mzp, sdf*) já
+#   depositados na RAIZ de /media/rodrigo/dados/k8s-volume/protheus-systemload/
+#   (sem subdiretórios).
 #
 # Ver README.md deste diretório para mais contexto.
 
@@ -21,8 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
 ROLE="${1:-}"
-if [ "$ROLE" != "worker" ] && [ "$ROLE" != "compile" ]; then
-  echo "Uso: $0 worker|compile" >&2
+if [ "$ROLE" != "worker" ] && [ "$ROLE" != "compile" ] && [ "$ROLE" != "upddistr" ]; then
+  echo "Uso: $0 worker|compile|upddistr" >&2
   exit 1
 fi
 
@@ -49,34 +52,65 @@ echo "=== Isolando o .rpo: parando appserver-core/rest/telnet ativos ==="
 stop_appservers
 STARTED=1
 
-echo "=== Rodando Job $JOB_NAME ==="
 kubectl delete job "$JOB_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null
-kubectl apply -f "$JOB_FILE"
 
-waited=0
-STATUS=""
-while [ "$waited" -lt "$JOB_TIMEOUT_SECONDS" ]; do
-  SUCCEEDED=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "")
-  FAILED=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.failed}' 2>/dev/null || echo "")
-  if [ "$SUCCEEDED" = "1" ]; then
-    STATUS="succeeded"
-    break
-  fi
-  if [ -n "$FAILED" ] && [ "$FAILED" -ge 1 ] 2>/dev/null; then
-    STATUS="failed"
-    break
-  fi
-  sleep 5
-  waited=$((waited + 5))
-done
+if [ "$ROLE" = "upddistr" ]; then
+  # upddistr nunca termina sozinho e o exit code do Pod não é confiável
+  # (o sidecar manda SIGTERM no appsrvlinux, não é um shutdown limpo
+  # garantido) -- o veredito real é o CONTEÚDO de Result.json/result.json,
+  # lido direto do bind mount do host, mesmo critério do run.sh. Ver
+  # comentário completo em base/appserver-upddistr-job.yaml.
+  echo "=== Limpando veredito anterior (Result.json/result.json) ==="
+  remove_old_result_files
 
-if [ -z "$STATUS" ]; then
-  echo "ERRO: Job $JOB_NAME não terminou em ${JOB_TIMEOUT_SECONDS}s (timeout)." >&2
-  STATUS="timeout"
+  echo "=== Rodando Job $JOB_NAME ==="
+  kubectl apply -f "$JOB_FILE"
+
+  echo "=== Aguardando veredito (até ${JOB_TIMEOUT_SECONDS}s) ==="
+  if RESULT_FILE=$(wait_for_result_file "$JOB_TIMEOUT_SECONDS"); then
+    echo "Veredito em: $RESULT_FILE"
+    if check_result_success "$RESULT_FILE"; then
+      STATUS="succeeded"
+    else
+      STATUS="failed"
+    fi
+  else
+    echo "ERRO: nenhum veredito apareceu em ${JOB_TIMEOUT_SECONDS}s (timeout)." >&2
+    STATUS="timeout"
+  fi
+
+  echo "=== Logs de $JOB_NAME (appserver-upddistr + result-watcher) ==="
+  kubectl logs -n "$NAMESPACE" "job/$JOB_NAME" -c appserver-upddistr --tail=100 || true
+  kubectl logs -n "$NAMESPACE" "job/$JOB_NAME" -c result-watcher --tail=20 || true
+else
+  echo "=== Rodando Job $JOB_NAME ==="
+  kubectl apply -f "$JOB_FILE"
+
+  waited=0
+  STATUS=""
+  while [ "$waited" -lt "$JOB_TIMEOUT_SECONDS" ]; do
+    SUCCEEDED=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.succeeded}' 2>/dev/null || echo "")
+    FAILED=$(kubectl get job "$JOB_NAME" -n "$NAMESPACE" -o jsonpath='{.status.failed}' 2>/dev/null || echo "")
+    if [ "$SUCCEEDED" = "1" ]; then
+      STATUS="succeeded"
+      break
+    fi
+    if [ -n "$FAILED" ] && [ "$FAILED" -ge 1 ] 2>/dev/null; then
+      STATUS="failed"
+      break
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+
+  if [ -z "$STATUS" ]; then
+    echo "ERRO: Job $JOB_NAME não terminou em ${JOB_TIMEOUT_SECONDS}s (timeout)." >&2
+    STATUS="timeout"
+  fi
+
+  echo "=== Logs de $JOB_NAME ==="
+  kubectl logs -n "$NAMESPACE" "job/$JOB_NAME" --tail=200 || true
 fi
-
-echo "=== Logs de $JOB_NAME ==="
-kubectl logs -n "$NAMESPACE" "job/$JOB_NAME" --tail=200 || true
 
 if [ "$STATUS" != "succeeded" ]; then
   echo "Job $JOB_NAME terminou com status: $STATUS" >&2

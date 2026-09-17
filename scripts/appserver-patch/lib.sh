@@ -9,6 +9,13 @@ ARGOCD_APP="protheus-devops-stack"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# Node k3d onde os PVs hostPath estão fixados (nodeAffinity) -- usado pro
+# upddistr, cujo veredito de sucesso/falha vem do CONTEÚDO de um arquivo no
+# bind mount real (ADR 0008), não do status do Job (ver
+# base/appserver-upddistr-job.yaml pro raciocínio completo).
+K3D_AGENT_NODE="k3d-protheus-cluster-agent-0"
+SYSTEMLOAD_HOSTPATH="/media/rodrigo/dados/k8s-volume/protheus-systemload"
+
 # Deployments que disputam o .rpo com worker/compile -- precisam estar a 0
 # réplicas antes do Job rodar. Ordem importa na restauração (core primeiro,
 # igual ao run.sh do Compose).
@@ -143,4 +150,39 @@ restore_appservers() {
       [ "${ORIGINAL_REPLICAS[$d]:-1}" != "0" ] && wait_for_pods_ready "$d"
     done
   fi
+}
+
+# --- upddistr: veredito lido direto do bind mount do host, não do Job ---
+
+remove_old_result_files() {
+  docker exec "$K3D_AGENT_NODE" sh -c \
+    "rm -f '$SYSTEMLOAD_HOSTPATH/Result.json' '$SYSTEMLOAD_HOSTPATH/result.json'"
+}
+
+# Eco o caminho do arquivo encontrado (Result.json ou result.json) em stdout.
+# Retorna 1 se estourar o timeout.
+wait_for_result_file() {
+  local timeout="${1:-900}" waited=0 found=""
+  while [ "$waited" -lt "$timeout" ]; do
+    if docker exec "$K3D_AGENT_NODE" test -f "$SYSTEMLOAD_HOSTPATH/Result.json" 2>/dev/null; then
+      found="$SYSTEMLOAD_HOSTPATH/Result.json"
+    elif docker exec "$K3D_AGENT_NODE" test -f "$SYSTEMLOAD_HOSTPATH/result.json" 2>/dev/null; then
+      found="$SYSTEMLOAD_HOSTPATH/result.json"
+    fi
+    if [ -n "$found" ]; then
+      echo "$found"
+      return 0
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  return 1
+}
+
+# Sai 0 se o arquivo contiver "success" (mesmo critério do run.sh:
+# `grep -q "success"`), imprime o conteúdo em stderr pra visibilidade.
+check_result_success() {
+  local path="$1"
+  docker exec "$K3D_AGENT_NODE" cat "$path" >&2
+  docker exec "$K3D_AGENT_NODE" grep -q "success" "$path"
 }

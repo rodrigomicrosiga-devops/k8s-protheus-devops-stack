@@ -1,0 +1,148 @@
+# AppServer "upddistr" -- atualiza o dicionário de dados a partir dos
+# arquivos em /totvs/protheus/systemload (SX*, *.mzp, sdf*). Papel efêmero
+# (Fase E), NÃO um Deployment.
+#
+# Mecanismo novo pro repo: upddistr sobe como AppServer normal com
+# [ONSTART] Jobs=UPDJOB e NUNCA termina sozinho (mesmo comportamento do
+# docker-compose.yaml -- o run.sh mata o container de fora fazendo polling
+# de systemload/Result.json). Não dá pra injetar um wrapper no container
+# principal (o entrypoint.sh da imagem faz `exec appsrvlinux`, substituindo
+# o processo inteiro -- e usar `command:` pra contornar isso descartaria o
+# entrypoint, regra já documentada). Solução: `shareProcessNamespace: true`
+# + um sidecar que faz o mesmo polling e manda SIGTERM no appsrvlinux
+# assim que o veredito aparece.
+#
+# O Job/Pod em si NÃO é a fonte da verdade sobre sucesso/falha -- o SIGTERM
+# não garante um exit code previsível do appsrvlinux. A fonte da verdade é
+# sempre o CONTEÚDO do Result.json (mesmo critério do run.sh:
+# `grep -q "success"`), lido pelo run-job.sh diretamente do bind mount do
+# host, não do status do Job.
+#
+# DELIBERADAMENTE FORA de base/kustomization.yaml -- mesmo raciocínio de
+# appserver-worker-job.yaml/appserver-compile-job.yaml (selfHeal reverteria
+# scale manual; hooks re-rodam a cada sync e colidiriam com a regra de nunca
+# rodar antes do bootstrap manual).
+#
+# Uso: sempre via scripts/appserver-patch/run-job.sh upddistr (nunca
+# `kubectl apply` direto -- o script para core/rest/telnet antes, limpa o
+# Result.json anterior, e lê o veredito certo depois).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: appserver-upddistr
+  namespace: protheus-devops
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: appserver-upddistr
+    spec:
+      restartPolicy: Never
+      shareProcessNamespace: true
+      initContainers:
+        - name: wait-for-rpo
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Aguardando RPO oficial em /totvs/protheus/apo/tttm120.rpo..."
+              until [ -s /totvs/protheus/apo/tttm120.rpo ]; do
+                sleep 5
+              done
+              echo "RPO presente."
+          volumeMounts:
+            - mountPath: /totvs/protheus/apo
+              name: protheus-apo
+      containers:
+        - name: appserver-upddistr
+          image: rodrigomicrosiga/appserver-dev:24.3.1.5
+          args: ["upddistr"]
+          env:
+            - name: ENV_NAME
+              value: "protheus"
+            # DB_NAME/DB_TYPE literais em vez de envFrom: configMapRef: postgres-config --
+            # ver comentário equivalente em appserver-worker-job.yaml.
+            - name: DB_NAME
+              value: "protheus"
+            - name: DB_TYPE
+              value: "POSTGRES"
+            - name: LICENSE_SERVER
+              value: "license-service"
+            - name: LICENSE_SERVER_PORT
+              value: "5555"
+            - name: DBACCESS_SERVER
+              value: "dbaccess-service"
+            - name: DBACCESS_PORT
+              value: "7890"
+            - name: RPO_CUSTOM_NAME
+              value: "custom"
+            - name: UPD_USER
+              value: "admin"
+            - name: UPD_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: appserver-upddistr-secret
+                  key: UPD_PASSWORD
+            - name: UPD_SIMULACAO
+              value: "false"
+            - name: UPD_EMPRESAS
+              value: "99"
+          # Sem privileged/cap_add/SYS_RAWIO/dev-mem na primeira versão --
+          # mesmo princípio do appserver-core.yaml.
+          volumeMounts:
+            - mountPath: /totvs/protheus/apo
+              name: protheus-apo
+            - mountPath: /totvs/protheus/system
+              name: protheus-system
+            - mountPath: /totvs/protheus/systemload
+              name: protheus-systemload
+            - mountPath: /totvs/protheus/log
+              name: protheus-log
+        # Sidecar: mata o appsrvlinux via PID namespace compartilhado assim
+        # que Result.json/result.json aparecer. Não determina sucesso/falha
+        # (isso é papel do run-job.sh, lendo o arquivo direto do host) --
+        # só existe pra permitir o Pod terminar.
+        - name: result-watcher
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Aguardando veredito em /totvs/protheus/systemload/{Result,result}.json..."
+              TARGET=""
+              while [ -z "$TARGET" ]; do
+                [ -f /totvs/protheus/systemload/Result.json ] && TARGET=/totvs/protheus/systemload/Result.json
+                [ -f /totvs/protheus/systemload/result.json ] && TARGET=/totvs/protheus/systemload/result.json
+                [ -n "$TARGET" ] && break
+                sleep 5
+              done
+              echo "Veredito encontrado em $TARGET:"
+              cat "$TARGET"
+              echo
+              echo "Encerrando appsrvlinux (PID namespace compartilhado)..."
+              PID=$(ps | grep '[a]ppsrvlinux' | awk '{print $1}' | head -1)
+              if [ -n "$PID" ]; then
+                echo "SIGTERM -> PID $PID"
+                kill "$PID" || true
+              else
+                echo "AVISO: appsrvlinux não encontrado -- já pode ter saído sozinho."
+              fi
+          volumeMounts:
+            - mountPath: /totvs/protheus/systemload
+              name: protheus-systemload
+      volumes:
+        - name: protheus-apo
+          persistentVolumeClaim:
+            claimName: protheus-apo-pvc
+        - name: protheus-system
+          persistentVolumeClaim:
+            claimName: protheus-system-pvc
+        - name: protheus-systemload
+          persistentVolumeClaim:
+            claimName: protheus-systemload-pvc
+        - name: protheus-log
+          persistentVolumeClaim:
+            claimName: protheus-log-pvc

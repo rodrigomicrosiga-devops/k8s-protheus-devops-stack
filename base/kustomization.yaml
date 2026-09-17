@@ -18,10 +18,12 @@ resources:
   # Fase D (2026-09-17): core já validado em produção real, rest/telnet entram.
   - appserver-rest.yaml
   - appserver-telnet.yaml
-  # Fase E (2026-09-17): só os PVCs de staging entram aqui -- os Jobs
-  # (appserver-worker-job.yaml, appserver-compile-job.yaml) ficam de fora de
-  # propósito, ver comentário no topo de cada um.
+  # Fase E (2026-09-17): só os PVCs de staging e o secret entram aqui -- os
+  # Jobs (appserver-worker-job.yaml, appserver-compile-job.yaml,
+  # appserver-upddistr-job.yaml) ficam de fora de propósito, ver comentário
+  # no topo de cada um.
   - protheus-patch-storage.yaml
+  - appserver-upddistr-secret.sealed.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:
