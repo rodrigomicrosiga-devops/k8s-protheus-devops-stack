@@ -162,15 +162,23 @@ Backlog agora é só dívida técnica menor (item 0 do backlog).
    Fase D nem a Fase E (todas fechadas em 2026-09-17); ainda fala em finalizar
    `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também não menciona
    `scripts/k3d-nodes/` nem `scripts/appserver-patch/` ainda.
-4. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
-   versões de appserver, dbaccess, webapp, webagent e printer além das atualmente empacotadas
-   (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`, `webapp-dev:10.2.1`, `printer-dev:3.0.5`
-   — não há `webagent` na stack ainda). Encaixa na convenção já validada do fleet (tag fixa =
-   versão do binário, nunca tag flutuante). Passos: usuário baixa os binários novos do TDN
-   (proprietário, exige credencial dele); build+push de cada imagem seguindo o
-   Dockerfile/CI já existente no repo correspondente; atualizar a referência de tag no Compose
-   local e no `base/*.yaml` + `image-updater.yaml` deste repo. Não é bloqueante para o resto do
-   backlog.
+4. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16; artefatos já baixados em
+   2026-09-17): a TOTVS já liberou novas versões de appserver, dbaccess, webapp, webagent e
+   printer além das atualmente empacotadas (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`,
+   `webapp-dev:10.2.1`, `printer-dev:3.0.5` — não há `webagent` na stack ainda, é componente
+   novo, não atualização). Encaixa na convenção já validada do fleet (tag fixa = versão do
+   binário, nunca tag flutuante). **Duas etapas, só a primeira é automática**: (a) push num
+   repo `docker-protheus-*` dispara o CI (self-hosted, `on: push` em `main`/`develop`) sozinho,
+   builda e publica no Docker Hub — mas a tag publicada é hardcoded no próprio
+   `.github/workflows/docker-publish.yml`, precisa ser editada antes do push; (b) o Image
+   Updater deste repo (`argocd/image-updater.yaml`) só rastreia digest de uma tag **fixa e já
+   conhecida** — uma versão nova não chega no cluster sozinha, precisa editar `imageName:` ali
+   e `image:` em `base/*.yaml` manualmente, e só daí o rastreio automático volta a valer.
+   Sequência completa (por repo, depois Compose, depois k8s) e um prompt reutilizável pronto
+   pra rodar em cada `docker-protheus-*`:
+   `docs/prompts/atualizar-versao-binario-totvs.md`. `docker-protheus-appserver-worker`
+   compartilha o mesmo `.tar.gz` do `docker-protheus-appserver` — repo e commit separados, mas
+   precisa do mesmo tratamento junto. Não é bloqueante para o resto do backlog.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
