@@ -4,7 +4,31 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-16)
+## Onde paramos (fim da sessão de 2026-09-17)
+
+Sessão de retomada pós-reboot da máquina. Dois problemas de boot resolvidos e o item 0 do
+backlog (persistência real dos hostPaths, alta prioridade) fechado. Detalhe completo em
+`docs/adr/0008-bind-mount-real-recriacao-isolada-dos-nodes.md`.
+
+**Boot da máquina**:
+1. Compose local religou sozinho porque os 11 serviços tinham `restart: always` (religa mesmo
+   depois de um `docker stop` manual, ao contrário de `unless-stopped`) — corrigido para
+   `unless-stopped` em `docker-protheus-devops-stack/docker-compose.yaml`.
+2. O `serverlb` do k3d morreu no boot: colisão de porta `7890` com o `protheus_dbaccess` do
+   Compose (os dois publicam essa porta no host). Esse mapeamento do LB não é usado por nada (o
+   acesso real ao dbaccess do cluster é via `kubectl port-forward`) — considerar removê-lo da
+   receita do LB quando ela for versionada (ver backlog).
+
+**Item 0 fechado**: `agent-0` recriado com bind mount real de `/media/rodrigo/dados/k8s-volume`
+(sem tocar no `server-0`, sem `k3d cluster delete`). Dois problemas reais não previstos no meio
+do caminho, ambos documentados no ADR 0008 com o fix exato: Secret de senha de registro do node
+(`kube-system/<node>.node-password.k3s`) precisa ser apagado a cada recriação de container; e um
+bug de cgroup v2 (`--cgroupns private` incompatível com o driver `systemd` do Docker neste host)
+resolvido trocando para `--cgroupns host` nos dois nodes. Backups tirados antes de mexer:
+`pg_dump` do Postgres e `tar` do datastore SQLite do `server-0`, ambos em
+`/media/rodrigo/dados/backups/` (fora do git). Nenhum dado perdido — validado ao vivo.
+
+## Sessão de 2026-09-16
 
 Handoff recuperado depois de ~6 semanas parado (última sessão real: 2026-07-30/31). A causa do
 "sumiço" foi estrutural, não de conteúdo: a memória do Claude Code é indexada por diretório de
@@ -30,21 +54,21 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
 
 **Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã):
 1. Fase D: aplicar `base/appserver-rest.yaml` e `base/appserver-telnet.yaml` (já corrigidos e
-   prontos, só faltam entrar no `base/kustomization.yaml`) — ver item 2 do backlog.
-2. Registrar as novas imagens no `argocd/image-updater.yaml` (item 3 do backlog).
-3. Corrigir o risco de persistência do cluster (ADR 0007) — item 0 do backlog, alta prioridade.
+   prontos, só faltam entrar no `base/kustomization.yaml`) — ver item 1 do backlog.
+2. Registrar as novas imagens no `argocd/image-updater.yaml` (item 2 do backlog).
+3. Versionar a receita de recriação dos nodes k3d (item 0 novo, nasceu em 2026-09-17).
 4. Fase E (worker/compile/upddistr) — ainda não iniciada, é o item mais complexo restante.
 
 ## Backlog aberto, por prioridade
 
-0. **Alta prioridade**: hostPaths do cluster (`postgres-pv` e os 5 PVs do AppServer,
-   `webapp-shared-pv`, `printer-shared-pv`) não têm bind mount real do disco físico — o node
-   `agent-0` não monta `/media/rodrigo/dados` de jeito nenhum, os dados vivem só na camada de
-   container do node. `docker restart` é seguro; `k3d cluster delete`/recriação apaga tudo
-   (~50 dias de estado do cluster) sem possibilidade de recuperação. Ver
-   `docs/adr/0007-hostpath-sem-bind-mount-real.md` para o plano de correção (recriar o cluster
-   com bind mount real, migrando os dados atuais antes). **Nunca rodar `k3d cluster delete` sem
-   backup explícito até isso ser corrigido.**
+0. **Receita de recriação de node k3d não está versionada** (novo, 2026-09-17 — substitui o item
+   0 antigo, fechado). `agent-0` e `server-0` só existem como containers Docker soltos, criados
+   fora deste repo; os comandos `docker run` completos (bind mount, `--cgroupns host`, volumes
+   nomeados, labels) só existem no `docker inspect` ao vivo e no ADR 0008. Um `docker rm`
+   acidental de qualquer um dos dois hoje exige reconstruir a receita do zero. Ação: extrair um
+   `docker run` (ou `k3d cluster create --config`) parametrizado para `scripts/`, cobrindo os
+   dois nodes, e sem o mapeamento de porta `7890` no `serverlb` (causou a colisão com o
+   `dbaccess` do Compose em 2026-09-17 — ver histórico da sessão). Ligado ao item 6.
 1. **Fase D**: aplicar `appserver-rest.yaml` e `appserver-telnet.yaml` (já corrigidos —
    `args:` em vez de `command:`, ver regra operacional abaixo — só faltam entrar no
    `kustomization.yaml`) depois do core validado (já está).
@@ -64,9 +88,8 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
    `docs/adr/0004-pv-nodeaffinity-imutavel.md`.
-6. **Receita do cluster k3d não está versionada** — não há `k3d cluster create` nem config
-   reproduzível no repo. README documenta um DR que hoje não recria o cluster do zero. Ligado
-   ao item 0 — a correção do bind mount deveria produzir essa receita como efeito colateral.
+6. **Receita do cluster k3d não está versionada** — mesmo item que o 0 (fundidos em
+   2026-09-17); ver lá. README documenta um DR que hoje não recria o cluster do zero.
 7. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída; ainda
    fala em finalizar `base/appserver.yaml` (removido, substituído por core/rest/telnet).
 8. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
@@ -100,8 +123,22 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
   `args:` para passar o papel (`core`/`rest`/`telnet`) sem descartar o `entrypoint.sh`. Bug real
   encontrado e corrigido nos 3 manifestos do AppServer em 2026-09-16.
 - **hostPath é node-local** — sempre validar por dentro do node k3d
-  (`docker exec k3d-protheus-cluster-agent-0 ...`), nunca pelo caminho físico do host. Ver ADR
-  0007: neste cluster específico, o caminho físico do host **nem está montado**.
+  (`docker exec k3d-protheus-cluster-agent-0 ...`). Desde 2026-09-17 (ADR 0008) o `agent-0` tem
+  bind mount real de `/media/rodrigo/dados/k8s-volume` — o caminho físico do host agora reflete
+  o node, mas siga validando por dentro do container por hábito (o `server-0` continua sem
+  nenhum bind mount desse caminho).
+- **Recriar um container de node k3d (`docker rm` + `docker run`) exige apagar o Secret de senha
+  do node antes** — `kubectl delete secret -n kube-system <nome-do-node>.node-password.k3s`. A
+  senha de registro é gerada aleatoriamente a cada `docker run` e só é aceita se esse Secret não
+  existir ainda; sem apagar, o node trava em `NotReady` com "Node password rejected, duplicate
+  hostname" para sempre. `docker restart`/`docker stop`+`docker start` do **mesmo** container não
+  precisa disso (reaproveita a mesma senha). Ver ADR 0008.
+- **Nodes k3d neste host precisam de `--cgroupns host`, não `--cgroupns private`** — com
+  `private` (usado pelos nodes originais desde julho) o kubelet trava num crashloop
+  (`cannot enter cgroupv2 "kubepods" with domain controllers -- it is in an invalid state`)
+  contra o driver `systemd` de cgroup do Docker deste host. Os dois nodes (`agent-0`, `server-0`)
+  foram recriados com `--cgroupns host` em 2026-09-17 — manter esse valor em qualquer recriação
+  futura. Ver ADR 0008.
 - **Preferir sync do Argo CD a `kubectl apply -k` direto** em recursos já geridos pela
   Application — em 2026-07-28 um apply direto reverteu digests do Image Updater para tags
   flutuantes do git e causou restart em massa (autocorrigido depois, mas evitável).
