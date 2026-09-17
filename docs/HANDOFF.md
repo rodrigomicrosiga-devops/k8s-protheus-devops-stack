@@ -28,6 +28,12 @@ resolvido trocando para `--cgroupns host` nos dois nodes. Backups tirados antes 
 `pg_dump` do Postgres e `tar` do datastore SQLite do `server-0`, ambos em
 `/media/rodrigo/dados/backups/` (fora do git). Nenhum dado perdido — validado ao vivo.
 
+**Receita dos nodes versionada** (mesmo dia): `scripts/k3d-nodes/` — `docker run` completo e
+parametrizado para recriar `agent-0`/`server-0` preservando o estado (volumes nomeados +
+bind mount), com token do cluster auto-detectado do node irmão em vez de hardcoded. Ver
+`scripts/k3d-nodes/README.md`. Fecha o item que tinha nascido como novo item 0 mais cedo na
+mesma sessão — não ficou órfão no backlog.
+
 ## Sessão de 2026-09-16
 
 Handoff recuperado depois de ~6 semanas parado (última sessão real: 2026-07-30/31). A causa do
@@ -54,54 +60,50 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
 
 **Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã):
 1. Fase D: aplicar `base/appserver-rest.yaml` e `base/appserver-telnet.yaml` (já corrigidos e
-   prontos, só faltam entrar no `base/kustomization.yaml`) — ver item 1 do backlog.
-2. Registrar as novas imagens no `argocd/image-updater.yaml` (item 2 do backlog).
-3. Versionar a receita de recriação dos nodes k3d (item 0 novo, nasceu em 2026-09-17).
-4. Fase E (worker/compile/upddistr) — ainda não iniciada, é o item mais complexo restante.
+   prontos, só faltam entrar no `base/kustomization.yaml`) — ver item 0 do backlog.
+2. Registrar as novas imagens no `argocd/image-updater.yaml` (item 1 do backlog).
+3. Fase E (worker/compile/upddistr) — ainda não iniciada, é o item mais complexo restante.
 
 ## Backlog aberto, por prioridade
 
-0. **Receita de recriação de node k3d não está versionada** (novo, 2026-09-17 — substitui o item
-   0 antigo, fechado). `agent-0` e `server-0` só existem como containers Docker soltos, criados
-   fora deste repo; os comandos `docker run` completos (bind mount, `--cgroupns host`, volumes
-   nomeados, labels) só existem no `docker inspect` ao vivo e no ADR 0008. Um `docker rm`
-   acidental de qualquer um dos dois hoje exige reconstruir a receita do zero. Ação: extrair um
-   `docker run` (ou `k3d cluster create --config`) parametrizado para `scripts/`, cobrindo os
-   dois nodes, e sem o mapeamento de porta `7890` no `serverlb` (causou a colisão com o
-   `dbaccess` do Compose em 2026-09-17 — ver histórico da sessão). Ligado ao item 6.
-1. **Fase D**: aplicar `appserver-rest.yaml` e `appserver-telnet.yaml` (já corrigidos —
+0. **Fase D**: aplicar `appserver-rest.yaml` e `appserver-telnet.yaml` (já corrigidos —
    `args:` em vez de `command:`, ver regra operacional abaixo — só faltam entrar no
    `kustomization.yaml`) depois do core validado (já está).
-2. **`argocd/image-updater.yaml`** não rastreia `appserver-dev`, `appserver-dev-worker` nem as
+1. **`argocd/image-updater.yaml`** não rastreia `appserver-dev`, `appserver-dev-worker` nem as
    3 imagens de seed — só os 6 componentes originais (dbaccess, postgres, license, webapp,
    printer, smartview). Precisa crescer junto com a Fase D.
-3. **Fase E (não iniciada)**: `worker`/`compile`/`upddistr` sem manifesto nenhum. O problema
+2. **Fase E (não iniciada)**: `worker`/`compile`/`upddistr` sem manifesto nenhum. O problema
    difícil: o `run.sh` do Compose **para** core/rest/telnet/smartview antes de qualquer job de
    patch/compile (lock de escrita no `.rpo`) e restaura depois — não há primitiva nativa no k8s
    para isso; candidato é um Job com hooks Argo CD PreSync/PostSync fazendo `scale`. Também em
    aberto desde 2026-07-28: como um dev deposita um `.ptm` real no volume do cluster (não é
    artefato publicado pela TOTVS, é trabalho do próprio dev).
-4. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
+3. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
-5. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
+4. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`.
-6. **Receita do cluster k3d não está versionada** — mesmo item que o 0 (fundidos em
-   2026-09-17); ver lá. README documenta um DR que hoje não recria o cluster do zero.
-7. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída; ainda
-   fala em finalizar `base/appserver.yaml` (removido, substituído por core/rest/telnet).
-8. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
+   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 5: mesmo se a receita de
+   `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
+5. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+   novos) — só existe receita para recriar o *container* de um node já existente em cima de
+   volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
+   cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
+   perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
+   `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
+6. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída; ainda
+   fala em finalizar `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também
+   não menciona `scripts/k3d-nodes/` ainda.
+7. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
    versões de appserver, dbaccess, webapp, webagent e printer além das atualmente empacotadas
    (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`, `webapp-dev:10.2.1`, `printer-dev:3.0.5`
    — não há `webagent` na stack ainda). Encaixa na convenção já validada do fleet (tag fixa =
    versão do binário, nunca tag flutuante). Passos: usuário baixa os binários novos do TDN
    (proprietário, exige credencial dele); build+push de cada imagem seguindo o
    Dockerfile/CI já existente no repo correspondente; atualizar a referência de tag no Compose
-   local e no `base/*.yaml` + `image-updater.yaml` deste repo. **Sequenciamento recomendado**:
-   depois da Fase D e do item 0 (persistência) — trocar versão em cima de um cluster ainda
-   instável misturaria variáveis de diagnóstico. Não é bloqueante para o resto do backlog.
+   local e no `base/*.yaml` + `image-updater.yaml` deste repo. Não é bloqueante para o resto do
+   backlog.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
