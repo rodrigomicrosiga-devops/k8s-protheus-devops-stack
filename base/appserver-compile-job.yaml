@@ -1,0 +1,107 @@
+# AppServer "compile" -- compila fonte customizado (.prw/.tlpp) depositado em
+# /totvs/protheus/patches_queue sobre o custom.rpo. Papel efêmero (Fase E),
+# NÃO um Deployment.
+#
+# DELIBERADAMENTE FORA de base/kustomization.yaml -- mesmo raciocínio de
+# base/appserver-worker-job.yaml (selfHeal reverteria scale manual; hooks
+# re-rodam a cada sync e colidiriam com a regra de nunca rodar antes do
+# bootstrap manual). Ver aquele arquivo para o detalhe completo.
+#
+# Falha se não achar nenhum .prw/.tlpp na fila (comportamento oposto ao
+# worker, que sai 0 quando a fila está vazia) -- não usar como smoke test
+# sem fonte real depositado.
+#
+# Uso: sempre via scripts/appserver-patch/run-job.sh compile (nunca
+# `kubectl apply` direto -- o script para core/rest/telnet antes e religa
+# depois).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: appserver-compile
+  namespace: protheus-devops
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: appserver-compile
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: prepare-volumes
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Aguardando RPO oficial em /totvs/protheus/apo/tttm120.rpo..."
+              until [ -s /totvs/protheus/apo/tttm120.rpo ]; do
+                sleep 5
+              done
+              echo "RPO presente."
+              mkdir -p /totvs/protheus/patches_queue/applied /totvs/protheus/patches_queue/error
+              mkdir -p /totvs/protheus/includes/advpl /totvs/protheus/includes/tlpp /totvs/protheus/includes/custom
+              chmod -R 0777 /totvs/protheus/patches_queue /totvs/protheus/includes
+          volumeMounts:
+            - mountPath: /totvs/protheus/apo
+              name: protheus-apo
+            - mountPath: /totvs/protheus/patches_queue
+              name: protheus-patches
+            - mountPath: /totvs/protheus/includes
+              name: protheus-includes
+      containers:
+        - name: appserver-compile
+          image: rodrigomicrosiga/appserver-dev-worker:24.3.1.5
+          args: ["compile"]
+          env:
+            - name: ENV_NAME
+              value: "protheus"
+            - name: LICENSE_SERVER
+              value: "license-service"
+            - name: LICENSE_SERVER_PORT
+              value: "5555"
+            - name: DBACCESS_SERVER
+              value: "dbaccess-service"
+            - name: DBACCESS_PORT
+              value: "7890"
+            - name: RPO_CUSTOM_NAME
+              value: "custom"
+          envFrom:
+            - configMapRef:
+                name: postgres-config
+          # Sem privileged/cap_add/SYS_RAWIO/dev-mem na primeira versão --
+          # mesmo princípio do appserver-core.yaml: só adiciona se um teste
+          # real provar necessidade, não por analogia com o docker-compose.
+          volumeMounts:
+            - mountPath: /totvs/protheus/apo
+              name: protheus-apo
+            - mountPath: /totvs/protheus/system
+              name: protheus-system
+            - mountPath: /totvs/protheus/systemload
+              name: protheus-systemload
+            - mountPath: /totvs/protheus/log
+              name: protheus-log
+            - mountPath: /totvs/protheus/patches_queue
+              name: protheus-patches
+            - mountPath: /totvs/protheus/includes
+              name: protheus-includes
+      volumes:
+        - name: protheus-apo
+          persistentVolumeClaim:
+            claimName: protheus-apo-pvc
+        - name: protheus-system
+          persistentVolumeClaim:
+            claimName: protheus-system-pvc
+        - name: protheus-systemload
+          persistentVolumeClaim:
+            claimName: protheus-systemload-pvc
+        - name: protheus-log
+          persistentVolumeClaim:
+            claimName: protheus-log-pvc
+        - name: protheus-patches
+          persistentVolumeClaim:
+            claimName: protheus-patches-pvc
+        - name: protheus-includes
+          persistentVolumeClaim:
+            claimName: protheus-includes-pvc

@@ -87,6 +87,11 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/protheus-systemload-dev
-        # appserver-dev-worker (Fase E: worker/compile/upddistr) fica de fora de propósito --
-        # ainda não existe nenhum manifesto que referencie essa imagem, então não haveria alvo
-        # pro Image Updater aplicar. Adicionar quando a Fase E ganhar manifesto de verdade.
+        # appserver-dev-worker (Fase E: worker/compile prontos em 2026-09-17, ver
+        # base/appserver-worker-job.yaml e base/appserver-compile-job.yaml) continua de fora
+        # de propósito -- os dois Jobs existem, mas ficam deliberadamente FORA de
+        # base/kustomization.yaml (nunca aplicados automaticamente pelo Argo CD, ver
+        # comentário nos próprios arquivos). Sem entrar no Kustomize, não há manifesto
+        # rastreado pro Image Updater mirar -- a entrada continuaria inerte. Quando a tag da
+        # imagem mudar, atualizar manualmente `image:` nos dois Jobs (mesmo fluxo do
+        # scripts/appserver-patch/, edição deliberada, não automação).

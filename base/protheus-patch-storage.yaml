@@ -1,0 +1,82 @@
+# ==============================================================================
+# Volumes de staging da Fase E (worker/compile) -- fila de .ptm e includes de
+# fonte customizado. Mesmo padrão de base/protheus-seed.yaml: hostPath fixado
+# no agent-0 via nodeAffinity, porque os dados reais vivem dentro do node (ver
+# docs/adr/0008-bind-mount-real-recriacao-isolada-dos-nodes.md).
+#
+# Depositar um .ptm aqui (fora do git, sempre manual, mesmo fluxo do Compose):
+#   cp arquivo.ptm /media/rodrigo/dados/k8s-volume/protheus-patches/
+# Validar por dentro do node antes de confiar no caminho físico do host:
+#   docker exec k3d-protheus-cluster-agent-0 ls -la /totvs (ou o caminho hostPath).
+# ==============================================================================
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-patches-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-patches
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-patches-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  volumeName: protheus-patches-pv
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-includes-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/protheus-includes
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-includes-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: protheus-includes-pv
