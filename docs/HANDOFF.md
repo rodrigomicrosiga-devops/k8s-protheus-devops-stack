@@ -47,13 +47,38 @@ só cobre core/rest/telnet — mesma imagem) e as 3 imagens de seed (RPO, system
 Decisão registrada inline no arquivo: RPO tem uma única imagem por release (nunca muda de
 digest sob a mesma tag — diferente de system/systemload, que recebem várias atualizações
 dentro do mesmo release), então rastrear via digest é seguro nos três, ao contrário do que eu
-tinha suposto inicialmente. `appserver-dev-worker` (Fase E) ficou de fora de propósito — sem
-manifesto ainda, não haveria alvo. Aplicado via `kubectl apply -f argocd/image-updater.yaml`
-(README já documenta esse fluxo, fora do Kustomize/Argo CD self-managed). Efeito colateral
-esperado e confirmado seguro: a primeira resolução tag→digest causou um restart único em
-`appserver-core`/`rest`/`telnet` e nos 3 seeds — todos subiram limpos, hash do RPO
-(`568f185e...`) e as 53 tabelas `SYS_*` confirmados intactos depois. O seed do RPO já é
-idempotente por design ("Seed em standby — governança do volume via Image Updater").
+tinha suposto inicialmente. `appserver-dev-worker` (Fase E) ficou de fora de propósito — ver
+seção da Fase E abaixo pro motivo atualizado. Aplicado via
+`kubectl apply -f argocd/image-updater.yaml` (README já documenta esse fluxo, fora do
+Kustomize/Argo CD self-managed). Efeito colateral esperado e confirmado seguro: a primeira
+resolução tag→digest causou um restart único em `appserver-core`/`rest`/`telnet` e nos 3 seeds
+— todos subiram limpos, hash do RPO (`568f185e...`) e as 53 tabelas `SYS_*` confirmados
+intactos depois. O seed do RPO já é idempotente por design ("Seed em standby — governança do
+volume via Image Updater").
+
+**Fase E, parte 1 fechada** (mesmo dia): `worker` e `compile` no cluster k8s, validado ao vivo
+de ponta a ponta. Achado que corrigiu a suposição original do backlog ("hooks Argo CD
+PreSync/PostSync fazendo `scale`"): a `Application` tem `selfHeal: true` + `prune: true` sem
+`ignoreDifferences` — um hook automatizado fazendo `kubectl scale` seria revertido pelo próprio
+Argo CD no sync seguinte. Desenho final: `replicas: 0` **commitado no git** (precedente do ADR
+0006), Jobs (`base/appserver-worker-job.yaml`, `-compile-job.yaml`) deliberadamente **fora**
+de `kustomization.yaml` (nunca tocados pelo sync automático — hooks PreSync re-rodam a cada
+sync por ADR 0003, incompatível com a regra do `CLAUDE.md` de nunca rodar antes do bootstrap
+manual), disparados só via `scripts/appserver-patch/run-job.sh`. Dois bugs reais achados e
+corrigidos no primeiro teste ao vivo: (1) `appserver-dev-worker` nunca tinha sido puxada neste
+node, pull anônimo esbarrou no rate limit do Docker Hub (429) — fix `imagePullSecrets: regcred`;
+(2) `envFrom: configMapRef: postgres-config` nunca resolvia, porque o nome real do ConfigMap
+sai com hash do `configMapGenerator` e só é reescrito pra recursos dentro do
+`kustomization.yaml` — fix: `DB_NAME`/`DB_TYPE` como env literais (mesmo padrão já usado em
+`smartview-db-init-job.yaml`, mesmo motivo raiz). Smoke test oficial (`worker` com fila vazia)
+rodou via `run-job.sh` de ponta a ponta sem intervenção manual: pausou core/rest/telnet
+(commit+push+sync+espera), rodou o Job (no-op esperado, `"Nenhum patch encontrado... Finalizando
+Job."`), restaurou as 3 réplicas. Confirmado depois: hash do RPO inalterado (`568f185e...`), 53
+tabelas `SYS_*` intactas, sem erro nos logs, Argo CD `Synced`/`Healthy`. `compile` tem manifesto
+pronto mas **não foi testado** com fonte real (precisa de `.prw`/`.tlpp` de teste, combinar com
+o usuário). `upddistr` não começado — precisa de um mecanismo novo (sidecar com
+`shareProcessNamespace` pra matar o `appsrvlinux` quando o veredito aparecer, já que ele nunca
+termina sozinho); é o próximo passo natural agora que a fundação está provada.
 
 ## Sessão de 2026-09-16
 
@@ -80,35 +105,49 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
    `dbaccess-service` (7891→7890).
 
 **Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã):
-1. Fase E (worker/compile/upddistr) — ainda não iniciada, é o item mais complexo restante
-   (item 0 do backlog).
+1. Testar `compile` com fonte real (`.prw`/`.tlpp`) — combinar com o usuário, não há fonte de
+   teste óbvia à mão (item 0 do backlog).
+2. Fase E, `upddistr` — o pedaço que falta, exige mecanismo novo (sidecar
+   `shareProcessNamespace`) (item 1 do backlog).
 
 ## Backlog aberto, por prioridade
 
-0. **Fase E (não iniciada)**: `worker`/`compile`/`upddistr` sem manifesto nenhum. O problema
-   difícil: o `run.sh` do Compose **para** core/rest/telnet/smartview antes de qualquer job de
-   patch/compile (lock de escrita no `.rpo`) e restaura depois — não há primitiva nativa no k8s
-   para isso; candidato é um Job com hooks Argo CD PreSync/PostSync fazendo `scale`. Também em
-   aberto desde 2026-07-28: como um dev deposita um `.ptm` real no volume do cluster (não é
-   artefato publicado pela TOTVS, é trabalho do próprio dev).
-1. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
+0. **`compile` sem teste real**: manifesto pronto e validado por dry-run/aplicação (ver seção
+   Fase E acima), mas nunca rodou com fonte de verdade — ao contrário do `worker`, `compile`
+   **falha** se não achar nenhum `.prw`/`.tlpp` na fila, então não dá pra validar com um
+   smoke test vazio. Precisa de um fonte customizado real (ou minúsculo, só pra prova de
+   conceito) e do aval do usuário pra depositar em
+   `/media/rodrigo/dados/k8s-volume/protheus-includes/`.
+1. **Fase E, `upddistr` (não iniciado)**: é o papel que falta pra fechar a Fase E. Diferente de
+   `worker`/`compile`, não mapeia num `Job` comum — sobe como AppServer com
+   `[ONSTART] Jobs=UPDJOB` e nunca termina sozinho (o `run.sh` do Compose mata ele de fora,
+   fazendo polling de `systemload/Result.json`). Candidato: Pod com `shareProcessNamespace:
+   true` e um sidecar que faz o mesmo polling e mata o `appsrvlinux` quando o veredito aparecer
+   — mecanismo novo pro repo, ainda não validado. A fundação (PVCs, `scripts/appserver-patch/`,
+   a dança `replicas: 0`/`1` via git) já está pronta e provada com `worker`; `upddistr` reusa
+   tudo isso, só precisa do desenho do sidecar. Também em aberto desde 2026-07-28: como um dev
+   deposita um `.ptm` real no volume do cluster — **resolvido** de fato pelo ADR 0008 (bind
+   mount real), documentado em `scripts/appserver-patch/README.md`.
+2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
-2. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
+3. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 3: mesmo se a receita de
+   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 4: mesmo se a receita de
    `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
-3. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+4. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
    novos) — só existe receita para recriar o *container* de um node já existente em cima de
    volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
    `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-4. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
-   Fase D (fechada em 2026-09-17); ainda fala em finalizar `base/appserver.yaml` (removido,
-   substituído por core/rest/telnet). Também não menciona `scripts/k3d-nodes/` ainda.
-5. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
+5. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
+   Fase D (fechada em 2026-09-17), nem a Fase E parte 1 (`worker`/`compile`, fechada
+   2026-09-17); ainda fala em finalizar `base/appserver.yaml` (removido, substituído por
+   core/rest/telnet). Também não menciona `scripts/k3d-nodes/` nem `scripts/appserver-patch/`
+   ainda.
+6. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
    versões de appserver, dbaccess, webapp, webagent e printer além das atualmente empacotadas
    (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`, `webapp-dev:10.2.1`, `printer-dev:3.0.5`
    — não há `webagent` na stack ainda). Encaixa na convenção já validada do fleet (tag fixa =
