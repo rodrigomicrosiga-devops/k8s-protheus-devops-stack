@@ -101,10 +101,18 @@ administrador fornecida pelo usuário (definida no bootstrap manual, sem default
 arquivos `sdf/bra/*` do pacote depositados na raiz de `protheus-systemload` (sem subdiretórios,
 conforme o `manifest.json` do próprio pacote pede), `upddistr` completou com
 `{"result":"success"}`, 54 tabelas `SYS_*` (uma a mais — dicionário de fato atualizado), hash do
-RPO base inalterado, `appserver-core`/`rest`/`telnet` religados sem erro. O pacote também trazia
-um `.ptm` real de 203 MB (`expedicao_continua_..._tttm120_op.ptm`), ainda não usado — candidato
-natural pra um próximo teste de `worker` com carga real, maior que o `teste.prw` mínimo usado
-até aqui.
+RPO base inalterado, `appserver-core`/`rest`/`telnet` religados sem erro.
+
+**`worker` também validado em escala real** (mesmo dia, pacote menor fornecido pelo usuário —
+`26-08-17-LIB_LABEL_17082026_P12_ONCA.ZIP`, um `.ptm` de 80 MB, "onça pintada"). Backup extra do
+`tttm120.rpo` tirado no host antes (`/media/rodrigo/dados/backups/tttm120-pre-worker-patch-
+20260917.rpo`, além do backup interno que o próprio `patch_deployer.sh` já faz em
+`aporollback/`). Patch aplicado com sucesso (`ApplyPatch: 190.681s`) — primeira vez que o RPO da
+produção do cluster foi de fato modificado por um patch real (antes só o `custom.rpo` tinha sido
+tocado, pelo teste de `compile`): hash mudou de `568f185e...` pra `9e8d81d8...`, `.ptm` migrou
+pra `patches_queue/applied/`, `appserver-core` subiu limpo com o RPO novo, sem erro. O `.ptm` de
+203 MB do pacote `EXPEDICAO_CONTINUA` (mencionado acima) continua disponível sem uso, se algum
+dia servir de teste em escala ainda maior.
 
 ## Sessão de 2026-09-16
 
