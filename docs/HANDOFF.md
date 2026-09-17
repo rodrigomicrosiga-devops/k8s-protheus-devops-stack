@@ -114,71 +114,88 @@ pra `patches_queue/applied/`, `appserver-core` subiu limpo com o RPO novo, sem e
 203 MB do pacote `EXPEDICAO_CONTINUA` (mencionado acima) continua disponível sem uso, se algum
 dia servir de teste em escala ainda maior.
 
-## Sessão de 2026-09-16
+**Atualização de binários TOTVS — em andamento** (mesmo dia, depois da Fase E fechada). Dois
+prompts reutilizáveis criados em `docs/prompts/`, pensados pra colar sem editar (autodescobrem
+o artefato pela raiz do repo via mtime + glob do Dockerfile, não por um caminho digitado):
+- `atualizar-versao-binario-totvs.md` — roda dentro de cada `docker-protheus-*`.
+- `atualizar-tags-compose.md` — roda depois, dentro do `docker-protheus-devops-stack`, sincroniza
+  o `docker-compose.yaml` com o que os repos irmãos já publicaram.
 
-Handoff recuperado depois de ~6 semanas parado (última sessão real: 2026-07-30/31). A causa do
-"sumiço" foi estrutural, não de conteúdo: a memória do Claude Code é indexada por diretório de
-trabalho, e as sessões de julho rodaram a partir de `/home/rodrigo`, não deste repo — daqui em
-diante este arquivo é a fonte da verdade, versionada, independente de ferramenta e de máquina.
-Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decisões arquiteturais.
+**3 de 5 repos já atualizados e publicados no Docker Hub** (confirmado via
+`docker manifest inspect`): `license-dev` 3.7.1→**3.7.2**, `appserver-dev` 24.3.1.5→**24.3.1.9**,
+`appserver-dev-worker` 24.3.1.5→**24.3.1.9**. Faltam `dbaccess-dev` e `webapp-dev`/`printer-dev`
+(usuário ainda não rodou o prompt nesses). `docker-compose.yaml` **ainda não foi atualizado** —
+continua nas versões antigas em todas as ocorrências (confirmado, `grep -n
+"image: rodrigomicrosiga"`). `webagent` segue fora de escopo (componente novo, sem repo).
 
-**Estado final, tudo validado ao vivo hoje:**
+**Achado novo**: o pacote de `includes.zip` (advpl/tlpp, necessário pro `compile`) **não tem
+repo nenhum e não tem seed image** — diferente de RPO/system/systemload (que têm
+`docker-protheus-{rpo,system,systemload}` dedicados). É `*.zip` no `.gitignore` do
+`docker-protheus-devops-stack` sob "TRAVA DE GOVERNANÇA" (mesmo tratamento de `.rpo`/`.ptm`,
+nunca vai pro git), e os arquivos que existem em `protheus/includes/{advpl,tlpp}/` datam de
+jun/jul de 2026 — nunca foram versionados nem re-obtidos desde então, e a origem exata (SDK do
+TDN? instalador do AppServer? outro pacote?) não está documentada em lugar nenhum. Registrado
+como item novo do backlog (ver abaixo) — pergunta em aberto pro usuário.
 
-1. **Compose local**: `protheus_core` destravado (estava em crashloop há dias). Banco recriado
-   limpo, bootstrap manual completo (login + criação de dicionário) sem erro, sistema abrindo
-   normalmente. Nomenclatura padronizada: banco `protheus`, role `protheus`, senha
-   `ProtheusPwd2026`, `ENV_NAME=protheus`.
-2. **Cluster k3d**: Fase C fechada — seeds do AppServer (RPO/system/systemload) provisionados,
-   `appserver-core` rodando (`1/1 Ready`), bootstrap manual completo (login + criação de
-   dicionário) sem erro, sistema abrindo normalmente. Mesma padronização de nomenclatura
-   aplicada: banco `protheus`, role `protheus`, senha `ProtheusPwd2026`, `ENV_NAME=protheus`.
-   `Synced`/`Healthy` no Argo CD.
-3. Compose está **parado** agora (containers down, exceto quando reaberto para validação) — o
-   cluster k3d é o ambiente ativo. Túneis abertos via `kubectl port-forward` (não persistem entre
-   sessões, precisa reabrir): `appserver-core` (1234/32033), `postgres-service` (5433→5432),
-   `dbaccess-service` (7891→7890).
-
-**Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã): nenhum item de Fase
-restante — a stack inteira (core/rest/telnet/worker/compile/upddistr) está no ar e validada.
-Backlog agora é só dívida técnica menor (item 0 do backlog).
+**Próximo passo, em ordem, pra retomar depois do reboot da máquina:**
+1. Rodar `docs/prompts/atualizar-versao-binario-totvs.md` nos repos que faltam:
+   `docker-protheus-dbaccess`, `docker-protheus-webapp`, `docker-protheus-printer` (se o usuário
+   já tiver os artefatos baixados pra esses).
+2. Rodar `docs/prompts/atualizar-tags-compose.md` no `docker-protheus-devops-stack` — sincroniza
+   e valida no Compose (fonte da verdade funcional) as versões já publicadas até aquele momento
+   (não precisa esperar os 5 repos, o prompt descobre sozinho quais mudaram).
+3. Só depois do Compose validado: portar as mesmas versões pro `base/*.yaml` +
+   `argocd/image-updater.yaml` deste repo (`k8s-protheus-devops-stack`) — ainda sem prompt
+   dedicado pra essa parte, fazer manualmente seguindo o padrão já usado na Fase D/image-updater
+   desta sessão.
+4. Resolver a dúvida do `includes.zip` com o usuário (origem real do pacote) antes de decidir se
+   vale criar um `docker-protheus-includes` (seed image, mesmo padrão de rpo/system/systemload).
+5. **Depois de tudo isso resolvido**, os itens de backlog que já estavam planejados antes desta
+   rodada de atualização de binários continuam de pé, nesta ordem (não foram esquecidos, só
+   ficaram atrás da atualização): segurança do `postgres-secret.env`, DR incompleto dos PVs,
+   `README.md` desatualizado, receita de recriar o cluster do zero.
 
 ## Backlog aberto, por prioridade
 
-0. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
+0. **Atualização de binários TOTVS (em andamento)** — ver "Próximo passo" acima pros passos
+   exatos. 3/5 repos publicados, Compose e k8s ainda pendentes.
+1. **Pacote de `includes.zip` sem repo/governança** (achado nesta sessão, 2026-09-17): necessário
+   pro `compile` (Fase E), hoje são só arquivos soltos em
+   `docker-protheus-devops-stack/protheus/includes/{advpl,tlpp}/`, gitignored, sem origem
+   documentada, sem versionamento. Pergunta em aberto pro usuário: de onde exatamente vêm esses
+   arquivos (SDK do TDN? instalador do AppServer? outro pacote TOTVS?) — só depois de saber isso
+   dá pra decidir se merece um repo/seed image dedicado tipo `docker-protheus-includes`, ou se um
+   tratamento mais simples basta.
+2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
-1. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
+3. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 2: mesmo se a receita de
+   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 4: mesmo se a receita de
    `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
-2. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+4. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
    novos) — só existe receita para recriar o *container* de um node já existente em cima de
    volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
    `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-3. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
+5. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
    Fase D nem a Fase E (todas fechadas em 2026-09-17); ainda fala em finalizar
    `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também não menciona
-   `scripts/k3d-nodes/` nem `scripts/appserver-patch/` ainda.
-4. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16; artefatos já baixados em
-   2026-09-17): a TOTVS já liberou novas versões de appserver, dbaccess, webapp, webagent e
-   printer além das atualmente empacotadas (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`,
-   `webapp-dev:10.2.1`, `printer-dev:3.0.5` — não há `webagent` na stack ainda, é componente
-   novo, não atualização). Encaixa na convenção já validada do fleet (tag fixa = versão do
-   binário, nunca tag flutuante). **Duas etapas, só a primeira é automática**: (a) push num
-   repo `docker-protheus-*` dispara o CI (self-hosted, `on: push` em `main`/`develop`) sozinho,
-   builda e publica no Docker Hub — mas a tag publicada é hardcoded no próprio
-   `.github/workflows/docker-publish.yml`, precisa ser editada antes do push; (b) o Image
-   Updater deste repo (`argocd/image-updater.yaml`) só rastreia digest de uma tag **fixa e já
-   conhecida** — uma versão nova não chega no cluster sozinha, precisa editar `imageName:` ali
-   e `image:` em `base/*.yaml` manualmente, e só daí o rastreio automático volta a valer.
-   Sequência completa (por repo, depois Compose, depois k8s) e um prompt reutilizável pronto
-   pra rodar em cada `docker-protheus-*`:
-   `docs/prompts/atualizar-versao-binario-totvs.md`. `docker-protheus-appserver-worker`
-   compartilha o mesmo `.tar.gz` do `docker-protheus-appserver` — repo e commit separados, mas
-   precisa do mesmo tratamento junto. Não é bloqueante para o resto do backlog.
+   `scripts/k3d-nodes/` nem `scripts/appserver-patch/` nem `docs/prompts/` ainda.
+
+## Estado ao desligar a máquina (2026-09-17, antes do reboot pedido pelo usuário)
+
+- **Compose**: parado (`docker compose ... stop`, containers preservados — `restart:
+  unless-stopped` agora, não volta sozinho no boot).
+- **Cluster k3d**: no ar, `Synced`/`Healthy`, 12 pods rodando (os Jobs de hoje já foram
+  autolimpos pelo `ttlSecondsAfterFinished`). Sobrevive ao reboot (`--restart unless-stopped`
+  confirmado nos 3 containers Docker do cluster: `server-0`, `agent-0`, `serverlb`) — mas o
+  `serverlb` já colidiu com a porta `7890` do Compose num boot anterior (mesmo dia, ver ADR
+  0008); se o Compose também subir sozinho de alguma forma, checar a porta de novo.
+- **Nada em voo**: todos os commits de hoje foram dados `push` pra `origin/develop`. Sem
+  trabalho local não commitado.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
