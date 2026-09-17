@@ -10,9 +10,7 @@ metadata:
   name: appserver-core
   namespace: protheus-devops
 spec:
-  # TEMPORARIAMENTE 0 (2026-09-16): mesmo motivo do dbaccess.yaml -- volta
-  # pra 1 no proximo commit desta mesma tarefa.
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -47,7 +45,7 @@ spec:
           args: ["core"]
           env:
             - name: ENV_NAME
-              value: "protheus_dev"
+              value: "protheus"
             - name: APP_PORT_MULTI
               value: "1234"
             - name: APP_MONITOR_PORT

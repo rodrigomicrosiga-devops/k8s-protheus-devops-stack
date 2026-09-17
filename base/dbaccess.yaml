@@ -4,11 +4,7 @@ metadata:
   name: dbaccess
   namespace: protheus-devops
 spec:
-  # TEMPORARIAMENTE 0 (2026-09-16): parado pra padronizacao do usuario do
-  # banco (totvs -> protheus), seguindo o ADR 0006 -- nunca fazer DDL/rename
-  # de banco com o dbaccess ativo. Volta pra 1 no proximo commit desta
-  # mesma tarefa.
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: dbaccess
