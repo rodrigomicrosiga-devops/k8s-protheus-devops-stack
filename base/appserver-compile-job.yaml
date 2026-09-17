@@ -28,6 +28,12 @@ spec:
         app: appserver-compile
     spec:
       restartPolicy: Never
+      # rodrigomicrosiga/appserver-dev-worker nunca tinha sido puxada neste
+      # node antes -- pull anônimo do Docker Hub esbarrou no rate limit
+      # (429) depois das recriações de node de hoje. Credencial autenticada
+      # (mesma usada pelos seeds) tem quota bem maior, evita o problema.
+      imagePullSecrets:
+        - name: regcred
       initContainers:
         - name: prepare-volumes
           image: busybox:1.36
@@ -57,6 +63,12 @@ spec:
           env:
             - name: ENV_NAME
               value: "protheus"
+            # DB_NAME/DB_TYPE literais em vez de envFrom: configMapRef: postgres-config --
+            # ver comentário equivalente em appserver-worker-job.yaml.
+            - name: DB_NAME
+              value: "protheus"
+            - name: DB_TYPE
+              value: "POSTGRES"
             - name: LICENSE_SERVER
               value: "license-service"
             - name: LICENSE_SERVER_PORT
@@ -67,9 +79,6 @@ spec:
               value: "7890"
             - name: RPO_CUSTOM_NAME
               value: "custom"
-          envFrom:
-            - configMapRef:
-                name: postgres-config
           # Sem privileged/cap_add/SYS_RAWIO/dev-mem na primeira versão --
           # mesmo princípio do appserver-core.yaml: só adiciona se um teste
           # real provar necessidade, não por analogia com o docker-compose.
