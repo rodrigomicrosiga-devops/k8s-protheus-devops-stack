@@ -51,3 +51,42 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/smartview-dev
+        # Fase D (2026-09-17): appserver-core/-rest/-telnet compartilham a mesma imagem --
+        # uma entrada só cobre os três (o transformer de imagem do Kustomize aplica por nome,
+        # não por Deployment).
+        - alias: appserver
+          imageName: docker.io/rodrigomicrosiga/appserver-dev:24.3.1.5
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/appserver-dev
+        # As 3 imagens de seed do AppServer (protheus-seed.yaml, Fase C). RPO tem uma única
+        # imagem por release (12.1.2510 = um RPO só, pra sempre) -- diferente de
+        # system/systemload, que recebem várias atualizações dentro do mesmo release. Rastrear
+        # via digest é seguro nos três: a tag fica fixa até o dev decidir subir de release
+        # (mudança deliberada no git), nunca pula sozinho pra um release novo.
+        - alias: protheus-rpo-seed
+          imageName: docker.io/rodrigomicrosiga/protheus-rpo-dev:12.1.2510
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/protheus-rpo-dev
+        - alias: protheus-system-seed
+          imageName: docker.io/rodrigomicrosiga/protheus-system-dev:12.1.2510
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/protheus-system-dev
+        - alias: protheus-systemload-seed
+          imageName: docker.io/rodrigomicrosiga/protheus-systemload-dev:12.1.2510
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/protheus-systemload-dev
+        # appserver-dev-worker (Fase E: worker/compile/upddistr) fica de fora de propósito --
+        # ainda não existe nenhum manifesto que referencie essa imagem, então não haveria alvo
+        # pro Image Updater aplicar. Adicionar quando a Fase E ganhar manifesto de verdade.
