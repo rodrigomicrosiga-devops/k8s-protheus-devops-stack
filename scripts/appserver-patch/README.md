@@ -41,6 +41,11 @@ docker exec k3d-protheus-cluster-agent-0 ls -la /totvs/protheus/patches_queue 2>
   || echo "confira o caminho hostPath real do PV protheus-patches-pv"
 ```
 
+Pro `compile`, os `includes.zip` (advpl/tlpp) já foram depositados em
+`/media/rodrigo/dados/k8s-volume/protheus-includes/{advpl,tlpp}/` em 2026-09-17 (cópia dos
+mesmos arquivos usados pelo Compose, `docker-protheus-devops-stack/protheus/includes/`) — não
+precisa repetir esse passo a menos que a TOTVS libere includes novos.
+
 **2. Rodar:**
 
 ```sh

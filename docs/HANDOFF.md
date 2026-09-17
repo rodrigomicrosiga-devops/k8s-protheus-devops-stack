@@ -70,13 +70,20 @@ node, pull anônimo esbarrou no rate limit do Docker Hub (429) — fix `imagePul
 (2) `envFrom: configMapRef: postgres-config` nunca resolvia, porque o nome real do ConfigMap
 sai com hash do `configMapGenerator` e só é reescrito pra recursos dentro do
 `kustomization.yaml` — fix: `DB_NAME`/`DB_TYPE` como env literais (mesmo padrão já usado em
-`smartview-db-init-job.yaml`, mesmo motivo raiz). Smoke test oficial (`worker` com fila vazia)
-rodou via `run-job.sh` de ponta a ponta sem intervenção manual: pausou core/rest/telnet
-(commit+push+sync+espera), rodou o Job (no-op esperado, `"Nenhum patch encontrado... Finalizando
-Job."`), restaurou as 3 réplicas. Confirmado depois: hash do RPO inalterado (`568f185e...`), 53
-tabelas `SYS_*` intactas, sem erro nos logs, Argo CD `Synced`/`Healthy`. `compile` tem manifesto
-pronto mas **não foi testado** com fonte real (precisa de `.prw`/`.tlpp` de teste, combinar com
-o usuário). `upddistr` não começado — precisa de um mecanismo novo (sidecar com
+`smartview-db-init-job.yaml`, mesmo motivo raiz). Dois ciclos completos rodaram via
+`run-job.sh` de ponta a ponta sem intervenção manual, cada um pausando core/rest/telnet
+(commit+push+sync+espera) e restaurando depois:
+- **`worker`** com fila vazia (no-op esperado, `"Nenhum patch encontrado... Finalizando
+  Job."`) — hash do RPO (`568f185e...`) inalterado depois.
+- **`compile` com fonte real** (`teste.prw`, fornecido pelo usuário) — sucesso completo:
+  `Total sources(1) Success(1) Errors(0)`, `custom.rpo` criado do zero (21.190 bytes) com o
+  fonte integrado, `tttm120.rpo` (RPO base) inalterado — confirma a separação esperada entre
+  RPO base e RPO customizado. Os `includes.zip` (advpl/tlpp) precisaram ser depositados manualmente
+  no volume do cluster antes (`/media/rodrigo/dados/k8s-volume/protheus-includes/`, copiados
+  dos mesmos arquivos já usados pelo Compose) — primeira vez que esse volume era usado.
+
+Confirmado depois dos dois: 53 tabelas `SYS_*` intactas, sem erro nos logs, Argo CD
+`Synced`/`Healthy`. `upddistr` não começado — precisa de um mecanismo novo (sidecar com
 `shareProcessNamespace` pra matar o `appsrvlinux` quando o veredito aparecer, já que ele nunca
 termina sozinho); é o próximo passo natural agora que a fundação está provada.
 
@@ -105,20 +112,12 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
    `dbaccess-service` (7891→7890).
 
 **Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã):
-1. Testar `compile` com fonte real (`.prw`/`.tlpp`) — combinar com o usuário, não há fonte de
-   teste óbvia à mão (item 0 do backlog).
-2. Fase E, `upddistr` — o pedaço que falta, exige mecanismo novo (sidecar
-   `shareProcessNamespace`) (item 1 do backlog).
+1. Fase E, `upddistr` — o único pedaço que falta pra fechar a Fase E, exige mecanismo novo
+   (sidecar `shareProcessNamespace`) (item 0 do backlog).
 
 ## Backlog aberto, por prioridade
 
-0. **`compile` sem teste real**: manifesto pronto e validado por dry-run/aplicação (ver seção
-   Fase E acima), mas nunca rodou com fonte de verdade — ao contrário do `worker`, `compile`
-   **falha** se não achar nenhum `.prw`/`.tlpp` na fila, então não dá pra validar com um
-   smoke test vazio. Precisa de um fonte customizado real (ou minúsculo, só pra prova de
-   conceito) e do aval do usuário pra depositar em
-   `/media/rodrigo/dados/k8s-volume/protheus-includes/`.
-1. **Fase E, `upddistr` (não iniciado)**: é o papel que falta pra fechar a Fase E. Diferente de
+0. **Fase E, `upddistr` (não iniciado)**: é o papel que falta pra fechar a Fase E. Diferente de
    `worker`/`compile`, não mapeia num `Job` comum — sobe como AppServer com
    `[ONSTART] Jobs=UPDJOB` e nunca termina sozinho (o `run.sh` do Compose mata ele de fora,
    fazendo polling de `systemload/Result.json`). Candidato: Pod com `shareProcessNamespace:
@@ -128,26 +127,26 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
    tudo isso, só precisa do desenho do sidecar. Também em aberto desde 2026-07-28: como um dev
    deposita um `.ptm` real no volume do cluster — **resolvido** de fato pelo ADR 0008 (bind
    mount real), documentado em `scripts/appserver-patch/README.md`.
-2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
+1. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
-3. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
+2. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 4: mesmo se a receita de
+   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 3: mesmo se a receita de
    `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
-4. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+3. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
    novos) — só existe receita para recriar o *container* de um node já existente em cima de
    volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
    `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-5. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
+4. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
    Fase D (fechada em 2026-09-17), nem a Fase E parte 1 (`worker`/`compile`, fechada
    2026-09-17); ainda fala em finalizar `base/appserver.yaml` (removido, substituído por
    core/rest/telnet). Também não menciona `scripts/k3d-nodes/` nem `scripts/appserver-patch/`
    ainda.
-6. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
+5. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
    versões de appserver, dbaccess, webapp, webagent e printer além das atualmente empacotadas
    (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`, `webapp-dev:10.2.1`, `printer-dev:3.0.5`
    — não há `webagent` na stack ainda). Encaixa na convenção já validada do fleet (tag fixa =
