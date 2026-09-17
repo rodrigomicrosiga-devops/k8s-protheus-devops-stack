@@ -10,7 +10,7 @@ metadata:
   name: appserver-core
   namespace: protheus-devops
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
