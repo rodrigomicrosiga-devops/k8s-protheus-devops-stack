@@ -34,6 +34,15 @@ bind mount), com token do cluster auto-detectado do node irmão em vez de hardco
 `scripts/k3d-nodes/README.md`. Fecha o item que tinha nascido como novo item 0 mais cedo na
 mesma sessão — não ficou órfão no backlog.
 
+**Fase D fechada** (mesmo dia): `appserver-rest.yaml` e `appserver-telnet.yaml` registrados em
+`base/kustomization.yaml`, push pra `origin/develop`, Argo CD sincronizou sozinho (`selfHeal`).
+Bug real encontrado na revisão antes de aplicar: os dois manifestos ainda tinham
+`ENV_NAME=protheus_dev`, resíduo de antes da padronização de nomenclatura de 2026-09-16 (nunca
+tinha sido sincronizado com o `core`, que já usava `protheus`) — corrigido antes do commit.
+Pods `appserver-rest`/`appserver-telnet` `1/1 Running`, sem restarts, probes TCP (8400/23)
+passando. `argocd/image-updater.yaml` continua sem rastrear essas imagens — é o próximo item do
+backlog (antigo item 1, era o passo seguinte da Fase D).
+
 ## Sessão de 2026-09-16
 
 Handoff recuperado depois de ~6 semanas parado (última sessão real: 2026-07-30/31). A causa do
@@ -59,43 +68,39 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
    `dbaccess-service` (7891→7890).
 
 **Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã):
-1. Fase D: aplicar `base/appserver-rest.yaml` e `base/appserver-telnet.yaml` (já corrigidos e
-   prontos, só faltam entrar no `base/kustomization.yaml`) — ver item 0 do backlog.
-2. Registrar as novas imagens no `argocd/image-updater.yaml` (item 1 do backlog).
-3. Fase E (worker/compile/upddistr) — ainda não iniciada, é o item mais complexo restante.
+1. Registrar as novas imagens no `argocd/image-updater.yaml` (item 0 do backlog).
+2. Fase E (worker/compile/upddistr) — ainda não iniciada, é o item mais complexo restante.
 
 ## Backlog aberto, por prioridade
 
-0. **Fase D**: aplicar `appserver-rest.yaml` e `appserver-telnet.yaml` (já corrigidos —
-   `args:` em vez de `command:`, ver regra operacional abaixo — só faltam entrar no
-   `kustomization.yaml`) depois do core validado (já está).
-1. **`argocd/image-updater.yaml`** não rastreia `appserver-dev`, `appserver-dev-worker` nem as
+0. **`argocd/image-updater.yaml`** não rastreia `appserver-dev`, `appserver-dev-worker` nem as
    3 imagens de seed — só os 6 componentes originais (dbaccess, postgres, license, webapp,
-   printer, smartview). Precisa crescer junto com a Fase D.
-2. **Fase E (não iniciada)**: `worker`/`compile`/`upddistr` sem manifesto nenhum. O problema
+   printer, smartview). Fase D fechou em 2026-09-17 (`appserver-rest`/`appserver-telnet` no ar);
+   este item ficou pendente dela.
+1. **Fase E (não iniciada)**: `worker`/`compile`/`upddistr` sem manifesto nenhum. O problema
    difícil: o `run.sh` do Compose **para** core/rest/telnet/smartview antes de qualquer job de
    patch/compile (lock de escrita no `.rpo`) e restaura depois — não há primitiva nativa no k8s
    para isso; candidato é um Job com hooks Argo CD PreSync/PostSync fazendo `scale`. Também em
    aberto desde 2026-07-28: como um dev deposita um `.ptm` real no volume do cluster (não é
    artefato publicado pela TOTVS, é trabalho do próprio dev).
-3. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
+2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
-4. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
+3. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 5: mesmo se a receita de
+   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 4: mesmo se a receita de
    `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
-5. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+4. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
    novos) — só existe receita para recriar o *container* de um node já existente em cima de
    volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
    `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-6. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída; ainda
-   fala em finalizar `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também
-   não menciona `scripts/k3d-nodes/` ainda.
-7. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
+5. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
+   Fase D (fechada em 2026-09-17); ainda fala em finalizar `base/appserver.yaml` (removido,
+   substituído por core/rest/telnet). Também não menciona `scripts/k3d-nodes/` ainda.
+6. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
    versões de appserver, dbaccess, webapp, webagent e printer além das atualmente empacotadas
    (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`, `webapp-dev:10.2.1`, `printer-dev:3.0.5`
    — não há `webagent` na stack ainda). Encaixa na convenção já validada do fleet (tag fixa =
