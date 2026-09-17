@@ -83,9 +83,28 @@ sai com hash do `configMapGenerator` e só é reescrito pra recursos dentro do
   dos mesmos arquivos já usados pelo Compose) — primeira vez que esse volume era usado.
 
 Confirmado depois dos dois: 53 tabelas `SYS_*` intactas, sem erro nos logs, Argo CD
-`Synced`/`Healthy`. `upddistr` não começado — precisa de um mecanismo novo (sidecar com
-`shareProcessNamespace` pra matar o `appsrvlinux` quando o veredito aparecer, já que ele nunca
-termina sozinho); é o próximo passo natural agora que a fundação está provada.
+`Synced`/`Healthy`.
+
+**Fase E fechada por completo** (mesmo dia): `upddistr` validado ao vivo com pacote real da
+TOTVS (fornecido pelo usuário —
+`26-08-21_ATUALIZACAO_12.1.2510_BACKOFFICE_EXPEDICAO_CONTINUA.ZIP`). Mecanismo novo pro repo,
+detalhado no ADR 0009: `shareProcessNamespace: true` + sidecar `result-watcher` (`busybox`) que
+mata o `appsrvlinux` via PID namespace compartilhado assim que `Result.json`/`result.json`
+aparece — não dá pra injetar wrapper no container principal (`entrypoint.sh` faz
+`exec appsrvlinux`). Achado importante confirmado ao vivo: **o status do Job não é confiável**
+pra `upddistr` — um teste que falhou por autorização (`UPD_PASSWORD` errado) ainda assim
+terminou com o Job `succeeded` (o `SIGTERM` não garante exit code refletindo o resultado real).
+`run-job.sh` lê o `Result.json` direto do bind mount do host (`docker exec` no `agent-0`),
+nunca confia no status do Job pra esse papel. Credencial do UPDDISTR (`UPD_PASSWORD`) selada
+via `kubeseal` (`appserver-upddistr-secret.sealed.yaml`), nunca literal no YAML — senha real do
+administrador fornecida pelo usuário (definida no bootstrap manual, sem default). Teste real:
+arquivos `sdf/bra/*` do pacote depositados na raiz de `protheus-systemload` (sem subdiretórios,
+conforme o `manifest.json` do próprio pacote pede), `upddistr` completou com
+`{"result":"success"}`, 54 tabelas `SYS_*` (uma a mais — dicionário de fato atualizado), hash do
+RPO base inalterado, `appserver-core`/`rest`/`telnet` religados sem erro. O pacote também trazia
+um `.ptm` real de 203 MB (`expedicao_continua_..._tttm120_op.ptm`), ainda não usado — candidato
+natural pra um próximo teste de `worker` com carga real, maior que o `teste.prw` mínimo usado
+até aqui.
 
 ## Sessão de 2026-09-16
 
@@ -111,42 +130,31 @@ Ver `CLAUDE.md` (carrega automaticamente nesta sessão) e `docs/adr/` para decis
    sessões, precisa reabrir): `appserver-core` (1234/32033), `postgres-service` (5433→5432),
    `dbaccess-service` (7891→7890).
 
-**Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã):
-1. Fase E, `upddistr` — o único pedaço que falta pra fechar a Fase E, exige mecanismo novo
-   (sidecar `shareProcessNamespace`) (item 0 do backlog).
+**Próximo passo, em ordem** (nada bloqueado, pronto pra retomar amanhã): nenhum item de Fase
+restante — a stack inteira (core/rest/telnet/worker/compile/upddistr) está no ar e validada.
+Backlog agora é só dívida técnica menor (item 0 do backlog).
 
 ## Backlog aberto, por prioridade
 
-0. **Fase E, `upddistr` (não iniciado)**: é o papel que falta pra fechar a Fase E. Diferente de
-   `worker`/`compile`, não mapeia num `Job` comum — sobe como AppServer com
-   `[ONSTART] Jobs=UPDJOB` e nunca termina sozinho (o `run.sh` do Compose mata ele de fora,
-   fazendo polling de `systemload/Result.json`). Candidato: Pod com `shareProcessNamespace:
-   true` e um sidecar que faz o mesmo polling e mata o `appsrvlinux` quando o veredito aparecer
-   — mecanismo novo pro repo, ainda não validado. A fundação (PVCs, `scripts/appserver-patch/`,
-   a dança `replicas: 0`/`1` via git) já está pronta e provada com `worker`; `upddistr` reusa
-   tudo isso, só precisa do desenho do sidecar. Também em aberto desde 2026-07-28: como um dev
-   deposita um `.ptm` real no volume do cluster — **resolvido** de fato pelo ADR 0008 (bind
-   mount real), documentado em `scripts/appserver-patch/README.md`.
-1. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
+0. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
-2. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
+1. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 3: mesmo se a receita de
+   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 2: mesmo se a receita de
    `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
-3. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+2. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
    novos) — só existe receita para recriar o *container* de um node já existente em cima de
    volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
    `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-4. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
-   Fase D (fechada em 2026-09-17), nem a Fase E parte 1 (`worker`/`compile`, fechada
-   2026-09-17); ainda fala em finalizar `base/appserver.yaml` (removido, substituído por
-   core/rest/telnet). Também não menciona `scripts/k3d-nodes/` nem `scripts/appserver-patch/`
-   ainda.
-5. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
+3. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
+   Fase D nem a Fase E (todas fechadas em 2026-09-17); ainda fala em finalizar
+   `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também não menciona
+   `scripts/k3d-nodes/` nem `scripts/appserver-patch/` ainda.
+4. **Atualização de binários TOTVS** (pedido do usuário, 2026-09-16): a TOTVS já liberou novas
    versões de appserver, dbaccess, webapp, webagent e printer além das atualmente empacotadas
    (`appserver-dev:24.3.1.5`, `dbaccess-dev:24.1.1.3`, `webapp-dev:10.2.1`, `printer-dev:3.0.5`
    — não há `webagent` na stack ainda). Encaixa na convenção já validada do fleet (tag fixa =
