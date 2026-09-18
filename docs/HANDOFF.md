@@ -20,8 +20,8 @@
    `appserver-dev:24.3.1.9` (core/rest/telnet) e `license-dev:3.7.2` — não voltou pra
    24.3.1.5/3.7.1. Se tiver voltado, o Image Updater pode ter re-resolvido pra outra coisa;
    investigar antes de mexer em qualquer manifesto.
-3. **Item 0 do backlog fechado nesta sessão** — Compose validado ao vivo nas tags novas, ver
-   abaixo. Nada pendente aqui.
+3. **Itens 0 e 5 do backlog fechados nesta sessão** — Compose validado ao vivo nas tags novas e
+   `README.md` atualizado (Fases C/D/E, scripts, prompts), ver abaixo. Nada pendente aqui.
 4. **Decisão do `includes.zip` segue pendente do usuário** — pergunta em aberto no backlog (item
    1): vale criar `docker-protheus-includes` como seed image? Não perguntar de novo sem o usuário
    trazer o assunto — já está registrado, é decisão dele, não follow-up automático.
@@ -39,7 +39,7 @@ prioridade") foi aplicada de forma permanente: `dbaccess` do Compose agora publi
 host (`DBACCESS_HOST_PORT`, default `7891` em `docker-compose.yaml`), mantendo `DBACCESS_PORT`
 (7890) intacto como porta interna — nenhum appserver percebe diferença, todos falam com
 `protheus_dbaccess:7890` pela rede `protheus_network`. Commit `18bb275` no
-`docker-protheus-devops-stack`. Isso também tira urgência do item 6 do backlog deste repo (limpar
+`docker-protheus-devops-stack`. Isso também tira urgência do item 5 do backlog deste repo (limpar
 o mapeamento inerte da 7890 no `serverlb`) — segue desejável, mas deixou de causar colisão prática.
 
 Gate de bootstrap respeitado: antes de subir o `core`, banco contado isoladamente (53 tabelas
@@ -61,6 +61,17 @@ padding (`\0`) e pode estourar limite de output em ferramentas que capturam text
 `tr -d '\000' < arquivo | tail -c N` (descarta os nulos antes de cortar) — `docker logs` do
 container não serve aqui, o entrypoint não propaga o log do `appsrvlinux` pro stdout do
 container além do banner inicial.
+
+**Item 5 do backlog fechado**: `README.md` estava parado na Fase B — não mencionava
+`protheus-seed.yaml` (Fase C), `appserver-core`/`-rest`/`-telnet` (Fase D) nem os Jobs
+`worker`/`compile`/`upddistr` (Fase E), e ainda citava `base/appserver.yaml` como
+"incompleto/WIP" (removido em 2026-09-17, substituído pelos três manifestos reais, que já
+montam `webapp-shared`/`printer-shared` read-only — a lacuna que o texto antigo apontava já
+estava fechada, só não registrada). Diagrama Mermaid ganhou as camadas de seeds e AppServer;
+seção de GitOps atualizada com a lista real de imagens rastreadas pelo Image Updater
+(`appserver-dev` e os 3 seeds faltavam) e o achado do `writeBackConfig`; nova seção linkando
+`docs/HANDOFF.md`, `docs/adr/`, `scripts/k3d-nodes/`, `scripts/appserver-patch/` e
+`docs/prompts/` — nenhum tinha menção no README antes. Commit `fded313`.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -290,11 +301,7 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
    `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-5. `README.md` desatualizado: não menciona `protheus-seed.yaml` nem a Fase C concluída, nem a
-   Fase D nem a Fase E (todas fechadas em 2026-09-17); ainda fala em finalizar
-   `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também não menciona
-   `scripts/k3d-nodes/` nem `scripts/appserver-patch/` nem `docs/prompts/` ainda.
-6. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
+5. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
    dbaccess do cluster é via `kubectl port-forward`). Deixou de colidir na prática desde
    2026-09-18 (parte 2): o `dbaccess` do Compose passou a publicar em `7891` no host, então os
    dois lados nunca mais disputam a mesma porta. Sem urgência agora — segue desejável remover o
