@@ -8,6 +8,7 @@ resources:
   - license.yaml
   - webapp.yaml
   - printer.yaml
+  - webagent.yaml
   - protheus-seed.yaml
   - smartview.yaml
   - smartview-db-init-job.yaml

@@ -44,6 +44,13 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/printer-dev
+        - alias: webagent
+          imageName: docker.io/rodrigomicrosiga/webagent-dev:1.1.1
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/webagent-dev
         - alias: smartview
           imageName: docker.io/rodrigomicrosiga/smartview-dev:3.9.0
           commonUpdateSettings:

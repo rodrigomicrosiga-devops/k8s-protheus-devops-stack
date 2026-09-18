@@ -93,6 +93,9 @@ spec:
             - mountPath: /tmp/printer_shared
               name: printer-shared
               readOnly: true
+            - mountPath: /tmp/webagent_shared
+              name: webagent-shared
+              readOnly: true
       volumes:
         - name: protheus-apo
           persistentVolumeClaim:
@@ -112,6 +115,9 @@ spec:
         - name: printer-shared
           persistentVolumeClaim:
             claimName: printer-shared-pvc
+        - name: webagent-shared
+          persistentVolumeClaim:
+            claimName: webagent-shared-pvc
 ---
 apiVersion: v1
 kind: Service

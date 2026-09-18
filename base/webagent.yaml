@@ -1,0 +1,93 @@
+# Sidecar de entrega: não expõe porta nenhuma, só extrai os instaladores do
+# WebAgent (client-side, roda na estação do usuário -- nunca no servidor)
+# para um volume compartilhado. Montado somente-leitura por
+# appserver-core/-rest/-telnet em /tmp/webagent_shared -- espelha o
+# /tmp/webagent_shared:ro do docker-compose original. O AppServer copia
+# esses arquivos pra uma subpasta local (webagent/) e gera a seção
+# [WEBAGENT] do appserver.ini com caminho relativo -- ver
+# docker-protheus-appserver/entrypoint.sh e docker-protheus-webagent/README.md.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: webagent-shared-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/webagent-shared
+  # nodeAffinity declarada desde o nascimento do PV -- mesmo padrão de
+  # webapp-shared-pv/printer-shared-pv (ver ADR 0004 e ADR 0012), sem a
+  # dívida de retrofit porque este PV já nasce correto.
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: webagent-shared-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: webagent-shared-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webagent
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: webagent
+  template:
+    metadata:
+      labels:
+        app: webagent
+    spec:
+      # Mesmo tratamento de webapp/printer: o hostPath é auto-criado pelo
+      # kubelet como root:root 0755 na primeira vez que o Pod é agendado --
+      # sem esse init container, o usuário não-root da imagem não consegue
+      # escrever no volume.
+      initContainers:
+        - name: fix-shared-volume-permissions
+          image: busybox:1.36
+          command: ["sh", "-c", "chmod 0777 /mnt/webagent_shared"]
+          volumeMounts:
+            - mountPath: /mnt/webagent_shared
+              name: webagent-shared
+      containers:
+        - name: webagent
+          image: rodrigomicrosiga/webagent-dev:1.1.1
+          # Só readiness, sem liveness: se o instalador não foi provisionado,
+          # reiniciar o container não resolve (o entrypoint roda uma vez só
+          # e só avisa, não falha, se o volume vier vazio).
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/mnt/webagent_shared/web-agent-1.1.1-linux-x64-release.deb"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          volumeMounts:
+            - mountPath: /mnt/webagent_shared
+              name: webagent-shared
+      volumes:
+        - name: webagent-shared
+          persistentVolumeClaim:
+            claimName: webagent-shared-pvc
