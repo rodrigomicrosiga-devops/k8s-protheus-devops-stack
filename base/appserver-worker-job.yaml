@@ -60,7 +60,7 @@ spec:
               name: protheus-patches
       containers:
         - name: appserver-worker
-          image: rodrigomicrosiga/appserver-dev-worker:24.3.1.5
+          image: rodrigomicrosiga/appserver-dev-worker:24.3.1.9
           args: ["worker"]
           env:
             - name: ENV_NAME

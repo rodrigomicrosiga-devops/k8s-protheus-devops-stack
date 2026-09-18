@@ -58,7 +58,7 @@ spec:
               name: protheus-apo
       containers:
         - name: appserver-upddistr
-          image: rodrigomicrosiga/appserver-dev:24.3.1.5
+          image: rodrigomicrosiga/appserver-dev:24.3.1.9
           args: ["upddistr"]
           env:
             - name: ENV_NAME

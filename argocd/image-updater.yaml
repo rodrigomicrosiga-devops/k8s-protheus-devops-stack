@@ -24,7 +24,7 @@ spec:
             kustomize:
               name: rodrigomicrosiga/postgres-dev
         - alias: license
-          imageName: docker.io/rodrigomicrosiga/license-dev:3.7.1
+          imageName: docker.io/rodrigomicrosiga/license-dev:3.7.2
           commonUpdateSettings:
             updateStrategy: digest
           manifestTargets:
@@ -55,7 +55,7 @@ spec:
         # uma entrada só cobre os três (o transformer de imagem do Kustomize aplica por nome,
         # não por Deployment).
         - alias: appserver
-          imageName: docker.io/rodrigomicrosiga/appserver-dev:24.3.1.5
+          imageName: docker.io/rodrigomicrosiga/appserver-dev:24.3.1.9
           commonUpdateSettings:
             updateStrategy: digest
           manifestTargets:

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: license
-          image: rodrigomicrosiga/license-dev:3.7.1
+          image: rodrigomicrosiga/license-dev:3.7.2
           # Requer acesso privilegiado ao host: o dmidecode empacotado na imagem lê
           # /dev/mem para gerar o fingerprint de hardware usado pela TOTVS para
           # vincular a licença. Equivalente ao docker-compose original
