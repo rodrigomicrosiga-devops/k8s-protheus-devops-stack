@@ -53,6 +53,16 @@
    correção manual documentada, **não corrigida no manifesto ainda**); nodes recriados nascem com
    mount raiz em propagação `private` (quebra `node-exporter`) — **esse já corrigido dentro do
    próprio `01-fix-cgroupns.sh`**, não precisa de passo manual no próximo drill.
+8. **Item 3 (`webagent`) fechado — último item do backlog original** (ADR 0014): sidecar de
+   entrega implementado e validado nos dois ambientes (Compose e k8s), mesmo padrão de
+   `webapp`/`printer`. Verificar: `docker ps` deve mostrar `protheus_webagent` saudável no
+   Compose; `kubectl get pods -n protheus-devops -l app=webagent` deve mostrar `1/1 Running` no
+   k8s; `kubectl exec deploy/appserver-core -- grep -A3 WEBAGENT appserver.ini` deve mostrar a
+   seção preenchida. Se aparecer vazia logo após uma recriação simultânea do zero, é a condição
+   de corrida já documentada — um `kubectl rollout restart deployment appserver-core` resolve
+   (não afeta uso normal, só a janela entre a criação inicial do sidecar e do core). Nota: o
+   `docker-protheus-appserver` republicou sob a mesma tag `24.3.1.9` com esta mudança — digest
+   novo (`ddea2ad5...`), o Image Updater já propagou pro cluster sozinho.
 
 **Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
 `docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
@@ -270,6 +280,40 @@ drill ao vivo, não só a receita em teoria):
 
 Detalhe completo (passo a passo real, achados, follow-ups) em
 `docs/adr/0013-cluster-bootstrap-do-zero.md` e `scripts/cluster-bootstrap/README.md`.
+
+**Item 3 (`webagent`) fechado — último item do backlog original, implementado de ponta a ponta**
+(ADR 0014). Usuário explicou o requisito: WebAgent é utilitário client-side (dá ao SmartClient
+HTML acesso a disco/arquivo local do usuário), e recusou de propósito a opção de auto-download
+via `appserver.ini` que exigiria embutir o instalador de cada SO dentro da imagem do AppServer
+("não gostaria de fazer" — imagem ficaria pesada). Pedido de sugestão levou a uma investigação
+completa: PDF oficial da TOTVS (25 páginas, lido integralmente) confirmou que `[WEBAGENT]` aceita
+caminho relativo ao diretório do AppServer, não URL — abrindo espaço pra reusar exatamente o
+mecanismo que `webapp.so` já usa (sidecar + volume compartilhado + cópia local pelo entrypoint),
+sem tocar na imagem principal.
+
+Implementado: repo novo `docker-protheus-webagent` (público, só Linux x64 por enquanto — o
+`.tar.gz` oficial já traz `.deb`+`.rpm`, verificado direto no arquivo antes de perguntar ao
+usuário); `docker-protheus-appserver/entrypoint.sh` ganhou detecção dinâmica de arquivo (não fixa
+nome/versão) pra gerar `[WEBAGENT]`; Compose (`protheus_webagent`, `run.sh` atualizado) e k8s
+(`base/webagent.yaml`, PV com `nodeAffinity` desde o nascimento, registrado no Image Updater) —
+sequência deliberada, Compose primeiro (confirmado com o usuário, segue o padrão já usado pro
+AppServer nas Fases A-E), só depois k8s.
+
+Validado ao vivo nos dois: `appserver.ini` com a seção `[WEBAGENT]` correta e os dois instaladores
+no lugar certo, boot limpo, nenhum outro componente afetado, 171 tabelas intactas. Achado real no
+k8s (não hipótese): numa subida simultânea do zero, `appserver-core` pode gerar o `.ini` antes do
+sidecar `webagent` terminar de provisionar — mesma condição de corrida que já existe
+silenciosamente pra `webapp`/`printer` (o entrypoint só roda uma vez, não observa o volume depois
+do boot), não é regressão nova. Resolvido com `kubectl rollout restart`, e na prática irrelevante
+fora de um teste imediato pós-subida.
+
+Usuário perguntou se valeria já baixar os instaladores de Windows/macOS enquanto estava nisso —
+recomendação dada foi não fazer sem um artefato real pra testar (o `Dockerfile` só extrai
+`.tar.gz`, Windows/macOS vêm como `.zip`, e as chaves `Windows_x86`/`Windows_x64` são ambíguas
+por extensão, só distinguíveis pelo nome do arquivo — escrever essa lógica sem um arquivo real
+pra validar seria repetir o tipo de suposição não-testada que este projeto tem evitado o tempo
+todo). Arquitetura já preparada pra crescer sem redesenho quando houver necessidade real — ver
+README do `docker-protheus-webagent`.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -511,17 +555,25 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    Compose e k8s juntos (mesma senha nos dois, por decisão deliberada), reabrindo a
    padronização de 16/09 sem motivo novo. Detalhe completo em
    `docs/adr/0011-cofre-local-gpg-secrets-plaintext.md`.
-3. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
-   fora de escopo tanto do Compose quanto deste cluster até hoje — é o componente que faltaria
-   pra expor o SmartClient via navegador (HTML5) sem instalação local, hoje só validado via
-   SmartClient desktop nativo (`CORE_PORT_MULTI`). Artefato já baixado
-   (`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) desde 02/07, sem
-   nenhum trabalho de containerização começado — diferente dos outros itens do backlog, este não
-   é atualização de um repo existente: precisa de `docker-protheus-webagent` do zero
-   (Dockerfile/entrypoint novos, decisão de porta/exposição, CI própria, mesmo padrão dos outros
-   ~13 repos `docker-protheus-*`), só depois integração no `docker-compose.yaml` e em
-   `base/`/`argocd/image-updater.yaml` deste repo. Não bloqueia nada hoje. Prioridade e decisão
-   de fazer ficam com o usuário.
+3. ~~**`webagent` (SmartClient Web-Agent)**~~ — **fechado em 2026-09-18** (ADR 0014). Implementado
+   e validado ao vivo nos dois ambientes:
+   - Repo novo `docker-protheus-webagent` (público, `webagent-dev:1.1.1`, hoje só Linux x64 —
+     o `.tar.gz` oficial já traz `.deb`+`.rpm`).
+   - `docker-protheus-appserver/entrypoint.sh` ganhou o mesmo tratamento já dado ao `webapp.so`:
+     copia os arquivos do volume compartilhado e gera `[WEBAGENT]` no `appserver.ini` com
+     detecção dinâmica de arquivo (sem fixar nome/versão).
+   - **Compose**: `protheus_webagent` novo, montado em `core`/`rest`/`telnet`, `run.sh` com
+     suporte nos mesmos pontos de `webapp`/`printer`. Validado: `.ini` correto, boot limpo.
+   - **k8s**: `base/webagent.yaml` (PV com `nodeAffinity` desde o nascimento), montado nos 3
+     appservers, registrado no Image Updater. Validado: `Synced`/`Healthy`, 171 tabelas
+     intactas.
+   - **Achado real**: numa subida simultânea do zero, `appserver-core` pode gerar o `.ini` antes
+     do sidecar terminar de provisionar (mesma condição de corrida silenciosa que já existe pra
+     `webapp`/`printer`, não é bug novo) — resolve com um restart, irrelevante em uso real.
+   - **Windows/macOS**: não implementado de propósito — sem arquivo real pra validar o
+     Dockerfile (formato `.zip`, não `.tar.gz`) nem a lógica de detecção (`Windows_x86` vs
+     `Windows_x64`, ambíguos por extensão). Arquitetura já preparada pra adicionar sem
+     redesenho quando houver necessidade real e artefato pra testar — ver README do repo novo.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 

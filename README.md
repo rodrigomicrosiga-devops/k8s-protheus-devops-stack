@@ -32,6 +32,7 @@ graph TD
         subgraph DELIVERY_LAYER["Camada de Entrega (Sidecars sem Service)"]
             WEBAPP_POD["Pod: WebApp <br> v10.2.1"] --> WEBAPP_PVC["PVC: webapp-shared-pvc"]
             PRINTER_POD["Pod: Printer <br> v3.0.5"] --> PRINTER_PVC["PVC: printer-shared-pvc"]
+            WEBAGENT_POD["Pod: WebAgent <br> v1.1.1 (Linux x64)"] --> WEBAGENT_PVC["PVC: webagent-shared-pvc"]
         end
 
         subgraph SEED_LAYER["Camada de Seeds (Fase C -- artefatos proprietários)"]
@@ -50,6 +51,7 @@ graph TD
             CORE_POD -- lê --> SL_PVC
             CORE_POD -. monta ro .-> WEBAPP_PVC
             CORE_POD -. monta ro .-> PRINTER_PVC
+            CORE_POD -. monta ro .-> WEBAGENT_PVC
             CORE_POD -- TCP --> DBA_SVC
             REST_POD -- lê --> APO_PVC
             REST_POD -- TCP --> DBA_SVC
@@ -115,16 +117,17 @@ kubectl port-forward deployment/license 5555:5555 -n protheus-devops
 
 **Nota de segurança**: o Pod do `license` roda com `securityContext.privileged: true` e monta `/dev/mem` do host (`hostPath`). Isso replica o `cap_add: SYS_RAWIO` + `devices: /dev/mem:/dev/mem` que o `docker-compose` original já usava — o binário da TOTVS (via `dmidecode`, empacotado na imagem) lê `/dev/mem` para gerar o fingerprint de hardware ao qual a licença é vinculada. Sem um device plugin dedicado, o Kubernetes só libera esse acesso via `privileged: true`. Como o node do K3d roda no mesmo host físico da máquina de desenvolvimento, o fingerprint resultante é o mesmo de quando a licença rodava via `docker-compose`.
 
-5. `WebApp` e `Printer` (sidecars de entrega)
+5. `WebApp`, `Printer` e `WebAgent` (sidecars de entrega)
 
-`webapp` e `printer` são binários com versionamento independente do AppServer — cada um roda numa imagem exclusiva justamente para poder ser atualizado sozinho (nova versão do WebApp ou do Printer) sem precisar rebuildar ou reiniciar o AppServer. Eles não expõem porta nenhuma: o único trabalho de cada um é extrair seu binário para um `PersistentVolumeClaim` dedicado (`webapp-shared-pvc`, `printer-shared-pvc`) e ficar em standby. Não há verificação via `port-forward` aqui — a validação é conferir que os arquivos foram extraídos:
+`webapp`, `printer` e `webagent` são binários com versionamento independente do AppServer — cada um roda numa imagem exclusiva justamente para poder ser atualizado sozinho (nova versão do WebApp, Printer ou WebAgent) sem precisar rebuildar ou reiniciar o AppServer. Nenhum expõe porta: o único trabalho de cada um é extrair seus arquivos para um `PersistentVolumeClaim` dedicado (`webapp-shared-pvc`, `printer-shared-pvc`, `webagent-shared-pvc`) e ficar em standby. `webagent` é diferente dos outros dois numa coisa: é um utilitário **client-side** (roda na estação do usuário final, não no servidor) — este Pod só entrega o instalador (`.deb`/`.rpm`, hoje só Linux x64) pro navegador baixar através do AppServer, nunca executa o WebAgent em si. Não há verificação via `port-forward` aqui — a validação é conferir que os arquivos foram extraídos:
 
 ```bash
 kubectl exec deployment/webapp -n protheus-devops -- ls /mnt/webapp_shared
 kubectl exec deployment/printer -n protheus-devops -- ls /mnt/printer_shared
+kubectl exec deployment/webagent -n protheus-devops -- ls /mnt/webagent_shared
 ```
 
-Esses dois PVCs já têm consumidor: `base/appserver-core.yaml` monta os dois como somente-leitura em `/tmp/webapp_shared` e `/tmp/printer_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module` e `protheus_printer_volume` dentro do `appserver_core`. (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais — ver item 6 abaixo.)
+Esses três PVCs já têm consumidor: `base/appserver-core.yaml` (e `-rest`/`-telnet`) monta os três como somente-leitura em `/tmp/webapp_shared`, `/tmp/printer_shared` e `/tmp/webagent_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module`, `protheus_printer_volume` e `webagent_shared_module` dentro do `appserver_core`. O AppServer copia os arquivos do WebAgent para uma subpasta local (`webagent/`) e gera a seção `[WEBAGENT]` do `appserver.ini` com caminho relativo — ver `docs/adr/0014-webagent-sidecar-de-entrega.md`. (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais de AppServer — ver item 6 abaixo.)
 
 6. AppServer (`core`/`rest`/`telnet`) e os seeds do RPO/system/systemload
 
