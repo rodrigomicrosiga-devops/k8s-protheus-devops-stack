@@ -4,7 +4,60 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-17)
+## Onde paramos (fim da sessão de 2026-09-18)
+
+Retomada do handoff de 17/09. Item 0 do backlog (atualização de binários TOTVS) fechado no lado
+k8s — era o que faltava de fato; os passos 1 (repos irmãos) e 2 (Compose) já tinham sido
+adiantados na sessão anterior sem o handoff ter sido atualizado antes do reboot.
+
+**Higiene do boot**: os 6 containers do Compose (`protheus_core`/`postgres`/`license`/`webapp`/
+`printer`/`dbaccess`) voltaram sozinhos neste boot apesar do fix `unless-stopped` já commitado
+(`2c674b9`, sessão anterior) — a policy de restart fica gravada no container no momento em que
+ele é criado, não é relida do `docker-compose.yaml` a cada boot; nenhum dos 6 tinha sido
+recriado desde o commit. Efeito real: o `serverlb` do k3d venceu a corrida pela porta `7890` (já
+prevista como risco no handoff anterior) e o `protheus_dbaccess` morreu (`Bind for :::7890
+failed: port is already allocated`); o `protheus_core` ficou desde então girando em loop de
+`nc` esperando o dbaccess, sem nunca subir o `appsrvlinux` (não chegou a haver risco de
+bootstrap). Decisão do usuário: **no boot, o cluster é a prioridade** — a stack Compose não deve
+subir sozinha. Fix aplicado: `docker update --restart unless-stopped` nos 6 containers vivos (sem
+recriar) + `docker stop` neles. Não mexido: a receita do `serverlb` (mapeamento da `7890`
+continua lá, inerte — ver backlog).
+
+**Binários TOTVS — item 0 fechado no k8s**: confirmado que a `Application` usa `writeBackConfig:
+argocd` — o Image Updater grava o digest resolvido como override em
+`spec.source.kustomize.images`, e esse override **vence o que está no git**. Um bump só em
+`base/*.yaml` não teria efeito nenhum sozinho; era preciso editar também
+`argocd/image-updater.yaml` e reaplicá-lo. Achado novo, registrado nas regras operacionais
+abaixo. Editado (tags confirmadas publicadas via `docker manifest inspect` antes de escrever):
+`appserver-dev` 24.3.1.5→**24.3.1.9** (core/rest/telnet/upddistr), `appserver-dev-worker`
+24.3.1.5→**24.3.1.9** (worker/compile), `license-dev` 3.7.1→**3.7.2** — nos manifestos do
+Kustomize e nos 3 Jobs deliberadamente fora dele (ADR 0009), mais os aliases `appserver`/
+`license` do `image-updater.yaml`. Commit `6f54252`, push, `kubectl apply -f
+argocd/image-updater.yaml`, ciclo do Image Updater reescreveu os overrides
+(`images_updated=2`), Argo CD sincronizou sozinho: `Synced`/`Healthy`, `appserver-core`/`rest`/
+`telnet`/`license` com pods novos, 0 restarts. Confirmado depois: hash do RPO inalterado
+(`9e8d81d8…`, mesmo do patch "onça pintada"), 54 tabelas `SYS_*` intactas.
+
+**Pendência que fica registrada, não esquecida**: o Compose nunca foi de fato recriado com as
+tags novas (`appserver-dev`/`appserver-dev-worker` 24.3.1.9, `license-dev` 3.7.2) — o commit
+`2cfd5d8` da sessão anterior só editou o `docker-compose.yaml`, "a pedido, sem subir a stack".
+Os containers locais pararados nesta sessão continuam nas imagens antigas. Rodar
+`docs/prompts/atualizar-tags-compose.md` (passos 8–9, validação ao vivo) quando fizer sentido —
+não é bloqueante pra nada no cluster.
+
+**Item 1 do backlog (`includes.zip` sem repo/governança) — investigado, não implementado**:
+consumidor real é `docker-protheus-appserver-worker/code_compiler.sh:26-49` — cada zip
+(`advpl`/`tlpp`/`custom`) é extraído pra um diretório real antes do compile, porque a resolução
+de `#include` aninhado dentro do próprio zip é case-sensitive e falha (`File not found
+PRTOPDEF.CH`) se lido direto do zip. Origem confirmada do `advpl`: é um pacote `P12_INCLUDES.ZIP`
+do portal TOTVS, mesmo padrão de nomenclatura dos demais binários — o que está em uso hoje (155
+arquivos, jun/29) é uma revisão anterior à disponível em downloads (`26-08-07-P12_INCLUDES.ZIP`,
+157 arquivos). Origem do `tlpp` (`.th` de 2025-06-02) segue não identificada. `custom` é ponto de
+injeção do próprio dev, vazio por design, não é artefato TOTVS. Decisão de criar (ou não) um
+`docker-protheus-includes` seguindo o padrão de seed image (rpo/system/systemload) fica em aberto
+pro usuário — ver backlog.
+
+## Histórico condensado da sessão de 2026-09-17
 
 Sessão de retomada pós-reboot da máquina. Dois problemas de boot resolvidos e o item 0 do
 backlog (persistência real dos hostPaths, alta prioridade) fechado. Detalhe completo em
@@ -137,35 +190,21 @@ jun/jul de 2026 — nunca foram versionados nem re-obtidos desde então, e a ori
 TDN? instalador do AppServer? outro pacote?) não está documentada em lugar nenhum. Registrado
 como item novo do backlog (ver abaixo) — pergunta em aberto pro usuário.
 
-**Próximo passo, em ordem, pra retomar depois do reboot da máquina:**
-1. Rodar `docs/prompts/atualizar-versao-binario-totvs.md` nos repos que faltam:
-   `docker-protheus-dbaccess`, `docker-protheus-webapp`, `docker-protheus-printer` (se o usuário
-   já tiver os artefatos baixados pra esses).
-2. Rodar `docs/prompts/atualizar-tags-compose.md` no `docker-protheus-devops-stack` — sincroniza
-   e valida no Compose (fonte da verdade funcional) as versões já publicadas até aquele momento
-   (não precisa esperar os 5 repos, o prompt descobre sozinho quais mudaram).
-3. Só depois do Compose validado: portar as mesmas versões pro `base/*.yaml` +
-   `argocd/image-updater.yaml` deste repo (`k8s-protheus-devops-stack`) — ainda sem prompt
-   dedicado pra essa parte, fazer manualmente seguindo o padrão já usado na Fase D/image-updater
-   desta sessão.
-4. Resolver a dúvida do `includes.zip` com o usuário (origem real do pacote) antes de decidir se
-   vale criar um `docker-protheus-includes` (seed image, mesmo padrão de rpo/system/systemload).
-5. **Depois de tudo isso resolvido**, os itens de backlog que já estavam planejados antes desta
-   rodada de atualização de binários continuam de pé, nesta ordem (não foram esquecidos, só
-   ficaram atrás da atualização): segurança do `postgres-secret.env`, DR incompleto dos PVs,
-   `README.md` desatualizado, receita de recriar o cluster do zero.
+**Próximo passo definido no fim desta sessão (17/09)**: retomar o item 0 pelo lado k8s depois de
+resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde paramos" no topo).
 
 ## Backlog aberto, por prioridade
 
-0. **Atualização de binários TOTVS (em andamento)** — ver "Próximo passo" acima pros passos
-   exatos. 3/5 repos publicados, Compose e k8s ainda pendentes.
-1. **Pacote de `includes.zip` sem repo/governança** (achado nesta sessão, 2026-09-17): necessário
-   pro `compile` (Fase E), hoje são só arquivos soltos em
-   `docker-protheus-devops-stack/protheus/includes/{advpl,tlpp}/`, gitignored, sem origem
-   documentada, sem versionamento. Pergunta em aberto pro usuário: de onde exatamente vêm esses
-   arquivos (SDK do TDN? instalador do AppServer? outro pacote TOTVS?) — só depois de saber isso
-   dá pra decidir se merece um repo/seed image dedicado tipo `docker-protheus-includes`, ou se um
-   tratamento mais simples basta.
+0. **Validação ao vivo do Compose nas tags novas** (rebaixado de "Atualização de binários TOTVS"
+   — o essencial, k8s, foi fechado em 2026-09-18): `appserver-dev`/`appserver-dev-worker`
+   24.3.1.9 e `license-dev` 3.7.2 já estão no `docker-compose.yaml` (commit `2cfd5d8`), mas a
+   stack local nunca foi recriada com elas. Rodar `docs/prompts/atualizar-tags-compose.md`
+   (passos 8–9) quando fizer sentido — não bloqueia nada no cluster.
+1. **`docker-protheus-includes` (seed image) — decisão pendente do usuário**: origem do
+   `includes.zip` confirmada em 2026-09-18 (pacote `P12_INCLUDES.ZIP` do portal TOTVS pro
+   `advpl`; `tlpp` ainda sem origem identificada). Falta decidir se vale criar o repo seguindo o
+   padrão rpo/system/systemload — e, se sim, aplicar a revisão mais nova já disponível do
+   `advpl` (157 arquivos vs. 155 em uso).
 2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
@@ -184,18 +223,11 @@ como item novo do backlog (ver abaixo) — pergunta em aberto pro usuário.
    Fase D nem a Fase E (todas fechadas em 2026-09-17); ainda fala em finalizar
    `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também não menciona
    `scripts/k3d-nodes/` nem `scripts/appserver-patch/` nem `docs/prompts/` ainda.
-
-## Estado ao desligar a máquina (2026-09-17, antes do reboot pedido pelo usuário)
-
-- **Compose**: parado (`docker compose ... stop`, containers preservados — `restart:
-  unless-stopped` agora, não volta sozinho no boot).
-- **Cluster k3d**: no ar, `Synced`/`Healthy`, 12 pods rodando (os Jobs de hoje já foram
-  autolimpos pelo `ttlSecondsAfterFinished`). Sobrevive ao reboot (`--restart unless-stopped`
-  confirmado nos 3 containers Docker do cluster: `server-0`, `agent-0`, `serverlb`) — mas o
-  `serverlb` já colidiu com a porta `7890` do Compose num boot anterior (mesmo dia, ver ADR
-  0008); se o Compose também subir sozinho de alguma forma, checar a porta de novo.
-- **Nada em voo**: todos os commits de hoje foram dados `push` pra `origin/develop`. Sem
-  trabalho local não commitado.
+6. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
+   dbaccess do cluster é via `kubectl port-forward`), mas segue colidindo com a porta do
+   `dbaccess` do Compose sempre que ambos tentam subir no boot. Resolvido operacionalmente em
+   2026-09-18 (cluster tem prioridade, Compose não sobe sozinho) — remover da receita do LB
+   quando ela for versionada.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
@@ -236,6 +268,13 @@ como item novo do backlog (ver abaixo) — pergunta em aberto pro usuário.
 - **Preferir sync do Argo CD a `kubectl apply -k` direto** em recursos já geridos pela
   Application — em 2026-07-28 um apply direto reverteu digests do Image Updater para tags
   flutuantes do git e causou restart em massa (autocorrigido depois, mas evitável).
+- **Bump de versão de imagem: editar `base/*.yaml` sozinho não move nada no cluster** — a
+  `Application` usa `writeBackConfig: method: argocd`, então o Image Updater grava o digest
+  resolvido como override em `spec.source.kustomize.images`, e esse override vence o manifesto
+  do git enquanto a tag nova não for resolvida de novo. Fluxo correto (confirmado em
+  2026-09-18): editar `base/*.yaml` **e** o alias correspondente em `argocd/image-updater.yaml`,
+  commit+push, depois `kubectl apply -f argocd/image-updater.yaml` pra forçar o Image Updater a
+  reconciliar contra a tag nova — só aí o override é reescrito e o Argo CD sincroniza de fato.
 - **Hooks Argo CD (`PreSync` etc.) re-rodam a cada sync**, não só quando o spec do hook muda —
   desenhar hooks idempotentes (já é o caso do `smartview-db-init-job`, confirmado de novo hoje:
   rodou uma segunda vez sozinho após a mudança de credencial, sem efeito colateral).
