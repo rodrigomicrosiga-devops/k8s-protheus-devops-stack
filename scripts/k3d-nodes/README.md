@@ -16,7 +16,7 @@ recria os volumes nomeados (eles precisam já existir — são referenciados por
 `lib.sh`). Se o cluster inteiro for perdido (rede + todos os volumes), esta receita não serve —
 seria necessário reconstruir do zero, o que também reconstruiria a chave do `sealed-secrets` e
 perderia os namespaces `argocd`/`falco`/`monitoring`/`velero` (instalados fora do git — ver ADR
-0008). Isso continua sendo um risco não coberto; ver item 4 do backlog.
+0008). Isso continua sendo um risco não coberto; ver item 3 do backlog.
 
 ## Quando usar
 

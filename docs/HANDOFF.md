@@ -29,6 +29,13 @@
    Nenhum `compile` terminou com sucesso total ainda (fonte de teste colidiu com função já
    existente no `custom.rpo` — não é falha do include), mas isso não bloqueia mais nada; próximo
    `compile` real com fonte sem colisão deve fechar limpo. Ver ADR 0010.
+5. **Itens 2 e 3 (antigo) do backlog fechados nesta sessão** — cofre GPG pro
+   `postgres-secret.env` (ADR 0011) e recriação dos 3 PVs legados com `nodeAffinity` (ADR 0012).
+   Verificar: `kubectl get pv postgres-pv webapp-shared-pv printer-shared-pv` deve mostrar os 3
+   com `nodeAffinity` preenchida (não vazia) e `Bound`; os 6 consumidores (`postgres`, `webapp`,
+   `printer`, `appserver-core`/`-rest`/`-telnet`) `Running`, `1/1`, sem restart novo. Achado
+   registrado no ADR 0012 (seção "obstáculos reais") que é relevante quando o item 3 (receita de
+   cluster do zero, renumerado) for feito — ler antes de planejar.
 
 **Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
 `docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
@@ -43,7 +50,7 @@ prioridade") foi aplicada de forma permanente: `dbaccess` do Compose agora publi
 host (`DBACCESS_HOST_PORT`, default `7891` em `docker-compose.yaml`), mantendo `DBACCESS_PORT`
 (7890) intacto como porta interna — nenhum appserver percebe diferença, todos falam com
 `protheus_dbaccess:7890` pela rede `protheus_network`. Commit `18bb275` no
-`docker-protheus-devops-stack`. Isso também tira urgência do item 5 do backlog deste repo (limpar
+`docker-protheus-devops-stack`. Isso também tira urgência do item 4 do backlog deste repo (limpar
 o mapeamento inerte da 7890 no `serverlb`) — segue desejável, mas deixou de causar colisão prática.
 
 Gate de bootstrap respeitado: antes de subir o `core`, banco contado isoladamente (53 tabelas
@@ -87,7 +94,7 @@ mas isso é só de onde foram copiados — não é o pacote TOTVS de origem, e n
 `P12_INCLUDES.ZIP` do advpl (que tem `.th` só que prefixados `fw-tlpp-*`, schema diferente).
 Origem do `tlpp` continua aberta. Detalhe completo no item 1 do backlog abaixo.
 
-**`webagent` adicionado ao backlog (item 6)** a pedido do usuário — componente novo
+**`webagent` adicionado ao backlog (item 5)** a pedido do usuário — componente novo
 (`docker-protheus-webagent` não existe ainda), artefato já baixado desde 02/07
 (`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) mas sem nenhum
 trabalho de containerização começado.
@@ -160,6 +167,30 @@ sessão — não fica retida em lugar nenhum além do gerenciador de senhas dele
 outros 3 segredos selados (`smartview`, `appserver-upddistr`, `regcred`) não têm cópia plaintext
 no disco — só o Postgres tinha esse problema. Detalhe completo em
 `docs/adr/0011-cofre-local-gpg-secrets-plaintext.md`.
+
+**Item 3 (antigo) do backlog fechado — recriação de `postgres-pv`/`webapp-shared-pv`/
+`printer-shared-pv` com `nodeAffinity`** (ADR 0004 quitado, procedimento completo no ADR 0012).
+Usuário confirmou que não há dado de produção em risco — decisão de recriar de verdade, não só
+documentar. Linha de base capturada antes de mexer (171 tabelas no Postgres, hash de
+`webapp.so`/`printer`); pausa via git dos 6 consumidores; `kubectl delete` do PVC+PV (dado no
+hostPath preservado por `persistentVolumeReclaimPolicy: Retain`); `nodeAffinity` declarada no
+git; delete de novo (o `selfHeal` já tinha recriado do manifesto antigo antes do push — corrigido
+deletando outra vez); réplicas restauradas via git. Validação final idêntica à linha de base:
+171 tabelas, hashes de `webapp.so`/`printer` inalterados, 0 restart novo em qualquer outro
+componente do namespace.
+
+**Sessão real, não sem atrito** — um `kubectl annotate ... refresh=hard` desnecessário forçou uma
+sincronização completa do Argo CD, que reativa **todos** os hooks `PreSync` (ADR 0003), e criou
+uma dependência circular real: o hook `smartview-db-init` esperava o Postgres, que só seria
+aplicado depois do hook — e o Postgres estava pausado de propósito. Destravado com uma sequência
+de recuperação (terminar a operação travada, remover finalizer preso no Job do hook, aplicar
+`postgres.yaml` diretamente pra tirar o Postgres do zero-réplicas, corrigir o `envFrom` do
+ConfigMap com hash que o apply direto não reescreve) até o hook conseguir completar sozinho e o
+Argo CD terminar a sincronização normalmente. Nada disso afetou os outros componentes do cluster
+(dbaccess/license/smartview/seeds com os mesmos restarts de antes) nem os dados reais (Retain
+protegeu os 3 hostPaths pelos dois ciclos de delete+recreate). Tudo documentado em detalhe no ADR
+0012 ("Obstáculos reais enfrentados") — leitura obrigatória antes de tentar o item 3 (renumerado,
+receita de cluster do zero), que vai bater no mesmo problema em escala maior.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -399,23 +430,22 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    Compose e k8s juntos (mesma senha nos dois, por decisão deliberada), reabrindo a
    padronização de 16/09 sem motivo novo. Detalhe completo em
    `docs/adr/0011-cofre-local-gpg-secrets-plaintext.md`.
-3. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
-   `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
-   recriado do zero a partir deste repo perde essa afinidade. Ver
-   `docs/adr/0004-pv-nodeaffinity-imutavel.md`. Ligado ao item 4: mesmo se a receita de
-   `docker run` dos nodes for usada, ela não recria PV/PVC do zero.
-4. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
+3. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
    novos) — só existe receita para recriar o *container* de um node já existente em cima de
    volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
    cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
    perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
-   `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso.
-5. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
+   `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso. **Achado
+   relevante de 2026-09-18** (ADR 0012, ao recriar os PVs legados do item 3 antigo): um drill de
+   DR completo vai bater no mesmo problema de dependência circular entre o hook `PreSync`
+   `smartview-db-init` e o Postgres pausado/recriado — ver "Obstáculos reais enfrentados" no
+   ADR 0012 antes de planejar este item.
+4. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
    dbaccess do cluster é via `kubectl port-forward`). Deixou de colidir na prática desde
    2026-09-18 (parte 2): o `dbaccess` do Compose passou a publicar em `7891` no host, então os
    dois lados nunca mais disputam a mesma porta. Sem urgência agora — segue desejável remover o
    mapeamento morto da receita do LB quando ela for versionada, só por limpeza.
-6. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
+5. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
    fora de escopo tanto do Compose quanto deste cluster até hoje — é o componente que faltaria
    pra expor o SmartClient via navegador (HTML5) sem instalação local, hoje só validado via
    SmartClient desktop nativo (`CORE_PORT_MULTI`). Artefato já baixado

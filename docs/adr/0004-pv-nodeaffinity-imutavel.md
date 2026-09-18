@@ -1,7 +1,9 @@
 # ADR 0004 — `nodeAffinity` de PV já existente é imutável; 3 PVs ficam sem o campo no git
 
 ## Status
-Aceito, com dívida de DR explícita.
+**Dívida quitada em 2026-09-18** — os 3 PVs foram recriados do zero com `nodeAffinity` desde o
+nascimento. Ver ADR 0012 para o procedimento real (e os obstáculos reais enfrentados). Este ADR
+fica como registro histórico do problema original e da decisão de não fazer retrofit.
 
 ## Contexto
 `spec.nodeAffinity` de um `PersistentVolume` já criado é imutável no Kubernetes — nem `kubectl
@@ -23,10 +25,9 @@ cluster (fixados no mesmo node via edição direta, fora do fluxo GitOps). `prot
 exclusivo de PV que **já existia** antes da decisão de fixar o node.
 
 ## Consequências
-- **Dívida de disaster-recovery real**: recriar o cluster do zero a partir deste repo recria
-  esses 3 PVs **sem** `nodeAffinity`. Um pod pode ser agendado no node errado e subir com o
-  volume vazio. O procedimento de DR do README precisa de um passo manual documentado (aplicar
-  a afinidade fora do git, como foi feito originalmente) até esse PV ser recriado do zero.
+- ~~**Dívida de disaster-recovery real**: recriar o cluster do zero a partir deste repo recria
+  esses 3 PVs **sem** `nodeAffinity`.~~ Resolvido em 2026-09-18 (ADR 0012) — os 3 PVs foram
+  recriados do zero e já declaram `nodeAffinity` no git desde então.
 - Regra para qualquer PV novo: declarar `nodeAffinity` desde o primeiro commit (como
   `protheus-seed.yaml` já faz) evita este problema por completo. Nunca declarar retroativamente
   um campo imutável no git a menos que o valor já bata E a anotação `last-applied-configuration`
