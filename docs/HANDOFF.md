@@ -491,15 +491,17 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
      uma função já existente no `custom.rpo` (`U_TESTE`, de uma compilação de 17/09), rejeição
      correta do compilador, não falha do include. Resolve sozinho no próximo `compile` com fonte
      sem colisão de nome — não é uma pendência de infraestrutura.
-   - **`advpl`**: revisão nova já identificada e baixada (`~/Downloads/26-08-07-P12_INCLUDES.ZIP`,
-     157 arquivos vs. 155 em uso) — decisão de aplicar ou não fica pro usuário, procedimento
-     documentado no README do repo novo.
-   - **`tlpp`**: origem do pacote TOTVS **continua não identificada** — os 6 `tlpp-*.th` em uso
-     são idênticos byte-a-byte aos de `/media/rodrigo/dados/totvs/protheus/2410/includes/`
-     (instalação local antiga do Protheus 24.10, não um zip baixável), mas isso é só de onde
-     foram copiados, não a origem TOTVS. Não é o mesmo pacote do `advpl` (que tem `.th` também,
-     só que prefixados `fw-tlpp-*`, schema diferente). Busca por zip/pacote com "TLPP"/"SDK" no
-     nome em `~/Downloads`, `documentos/` e nas extensões do VS Code (TDS) não achou nada.
+   - **Governança de atualização fechada com o usuário em 2026-09-18**: `advpl` — o usuário
+     mesmo baixa a revisão nova via portal TOTVS sempre que houver uma; `tlpp` — atualizado
+     sempre que a TOTVS liberar algum binário com versão nova do TLPP pra extrair (não existe um
+     pacote standalone pra ele, ao contrário do `advpl` — confirma por que a origem nunca foi
+     encontrada como zip separado: não é um download direto, é extraído de dentro de outro
+     artefato); `custom` — só existe quando o usuário estiver desenvolvendo algo exclusivo, fica
+     vazio o resto do tempo (já era o desenho do repo, agora confirmado como política, não só
+     placeholder). Fluxo de aplicação (bump de versão) documentado no README do
+     `docker-protheus-includes`. Revisão nova do `advpl` já baixada
+     (`~/Downloads/26-08-07-P12_INCLUDES.ZIP`, 157 arquivos) fica disponível pro usuário aplicar
+     quando ele decidir — não é mais uma pendência de investigação, é rotina normal do processo.
 2. **Segurança — fechado em 2026-09-18**: `base/postgres-secret.env` (plaintext do
    `postgres-secret` selado) passou a ter backup cifrado com GPG simétrico
    (`base/postgres-secret.env.gpg`, versionado) em vez de existir só como arquivo puro sem
