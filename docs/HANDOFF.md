@@ -6,6 +6,29 @@
 
 ## Onde paramos (fim da sessão de 2026-09-18)
 
+**Verificar ao retomar amanhã, antes de qualquer coisa nova** (os 4 passos desta sessão foram
+aplicados e validados ao vivo antes do encerramento, mas dependem de estado externo — máquina
+pode ter sido reiniciada, cluster pode ter driftado):
+
+1. **Boot ficou higiênico?** `docker ps -a` não deve mostrar os 6 containers do Compose
+   (`protheus_core`/`postgres`/`license`/`webapp`/`printer`/`dbaccess`) rodando sozinhos — eles
+   devem estar `Exited`, não `Up`, a menos que o usuário os suba deliberadamente. Se algum
+   estiver `Up` sem ter sido pedido, a policy `unless-stopped` pode não ter pego (checar
+   `docker inspect <nome> --format '{{.HostConfig.RestartPolicy.Name}}'`).
+2. **Bump do k8s se sustentou?** `kubectl get applications -n argocd protheus-devops-stack` deve
+   seguir `Synced`/`Healthy`; `kubectl get pods -n protheus-devops -o
+   custom-columns='POD:.metadata.name,IMAGE:.spec.containers[*].image'` deve mostrar
+   `appserver-dev:24.3.1.9` (core/rest/telnet) e `license-dev:3.7.2` — não voltou pra
+   24.3.1.5/3.7.1. Se tiver voltado, o Image Updater pode ter re-resolvido pra outra coisa;
+   investigar antes de mexer em qualquer manifesto.
+3. **Pendência do Compose segue em aberto** (não é bug, é trabalho não feito ainda): containers
+   locais continuam nas imagens antigas (24.3.1.5/3.7.1) mesmo com o `docker-compose.yaml` já
+   apontando pra 24.3.1.9/3.7.2 desde o commit `2cfd5d8`. Só relevante quando o usuário quiser
+   validar o Compose ao vivo — rodar `docs/prompts/atualizar-tags-compose.md` (passos 8–9) então.
+4. **Decisão do `includes.zip` segue pendente do usuário** — pergunta em aberto no backlog (item
+   1): vale criar `docker-protheus-includes` como seed image? Não perguntar de novo sem o usuário
+   trazer o assunto — já está registrado, é decisão dele, não follow-up automático.
+
 Retomada do handoff de 17/09. Item 0 do backlog (atualização de binários TOTVS) fechado no lado
 k8s — era o que faltava de fato; os passos 1 (repos irmãos) e 2 (Compose) já tinham sido
 adiantados na sessão anterior sem o handoff ter sido atualizado antes do reboot.
@@ -56,6 +79,15 @@ arquivos, jun/29) é uma revisão anterior à disponível em downloads (`26-08-0
 injeção do próprio dev, vazio por design, não é artefato TOTVS. Decisão de criar (ou não) um
 `docker-protheus-includes` seguindo o padrão de seed image (rpo/system/systemload) fica em aberto
 pro usuário — ver backlog.
+
+**Estado ao encerrar a sessão de 2026-09-18**:
+- **Compose**: todos os 6 containers `Exited` (parados nesta sessão, passo A). Não devem voltar
+  sozinhos no próximo boot (`unless-stopped` já aplicado nos containers vivos, não só no
+  arquivo).
+- **Cluster k3d**: no ar, `Synced`/`Healthy`, appserver-core/rest/telnet e license confirmados em
+  24.3.1.9/3.7.2 com 0 restarts.
+- **Nada em voo**: os 2 commits desta sessão (`6f54252` bump de imagens, `31644bb` este handoff)
+  já têm `push` pra `origin/develop`. Sem trabalho local não commitado.
 
 ## Histórico condensado da sessão de 2026-09-17
 
