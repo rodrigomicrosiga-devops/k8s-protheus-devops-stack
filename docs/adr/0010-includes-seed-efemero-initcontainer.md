@@ -1,8 +1,17 @@
 # ADR 0010 — Seed do `includes` (ADVPL/TLPP) como initContainer efêmero, não Deployment em standby
 
 ## Status
-Aceito, implementado em 2026-09-18. Ainda não validado com um `compile` real (pendente rodar
-`scripts/appserver-patch/run-job.sh compile` depois desta mudança).
+Aceito, implementado e **validado ao vivo em 2026-09-18** — duas execuções reais de
+`scripts/appserver-patch/run-job.sh compile`, `Extraindo includes [advpl]`/`[tlpp]` e
+`ADVPL Preprocessor: Precompilation... ok` nas duas (fonte real usava `#include 'totvs.ch'`),
+confirmando que o `initContainer seed-includes` entrega os zips corretamente pro
+`code_compiler.sh`. As duas execuções terminaram com `Compilation Results: Errors(1)` — mas por
+um motivo alheio a esta mudança: o fonte de teste definia uma função (`U_TESTE`) já existente no
+`custom.rpo` desde uma compilação anterior (17/09), rejeitada pelo próprio compilador
+(`Duplicated function`), não por falta de include. Rollback automático confirmado nas duas vezes
+(hash do `custom.rpo` inalterado, `b390e7ce...`), cluster `Synced`/`Healthy` depois. A parte que
+este ADR cobre — entrega dos includes — está validada; um `compile` com sucesso total (fonte sem
+colisão de nome) fica pra quando houver um fonte real pra aplicar.
 
 ## Contexto
 O `compile` (Fase E, ADR 0009) precisa dos headers ADVPL (`.ch`) e TLPP (`.th`) da TOTVS pra
@@ -61,6 +70,6 @@ estático, consumido só pelo `compile` — que já é um `Job` efêmero por des
 - Diferente dos outros três seeds, este não precisa de `regcred` correndo 24/7 nem de espaço em
   disco reservado (PV) pra algo lido só quando um dev decide compilar — mais barato em recursos
   do node, sem nenhuma perda de robustez (o dado é estático, não há "estado" a proteger).
-- Pendência real: esta mudança ainda não foi validada com um `compile` de ponta a ponta (o
-  próximo teste real de `compile` vai confirmar se o initContainer novo entrega os zips
-  corretamente pro `code_compiler.sh`).
+- Validado ao vivo (ver Status acima): entrega dos includes confirmada em duas execuções reais.
+  Um `compile` com sucesso total (`Errors(0)`) segue pendente só por falta de um fonte real sem
+  colisão de nome pra aplicar — não é mais uma pendência desta mudança.

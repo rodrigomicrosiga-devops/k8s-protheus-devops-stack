@@ -22,14 +22,13 @@
    investigar antes de mexer em qualquer manifesto.
 3. **Itens 0 e 5 do backlog fechados nesta sessão** — Compose validado ao vivo nas tags novas e
    `README.md` atualizado (Fases C/D/E, scripts, prompts), ver abaixo. Nada pendente aqui.
-4. **Item 1 do backlog (`includes.zip`) implementado, ainda NÃO validado ao vivo** — repo
-   `docker-protheus-includes` criado e publicado, `appserver-compile-job.yaml` alterado (ADR
-   0010, ver abaixo). Falta: (a) configurar `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` no repo novo
-   no GitHub (o CI ainda não rodou — sem esses secrets, falha no login do Docker Hub); (b)
-   depois do CI publicar `rodrigomicrosiga/protheus-includes-dev:0.0.1`, rodar
-   `scripts/appserver-patch/run-job.sh compile` com fonte real pra confirmar que o
-   `initContainer seed-includes` entrega os zips certos pro `code_compiler.sh`. Não dar como
-   fechado antes dessa validação.
+4. **Item 1 do backlog (`includes.zip`) implementado E validado ao vivo** — repo
+   `docker-protheus-includes` criado, publicado, CI rodou com sucesso
+   (`protheus-includes-dev:0.0.1` no Docker Hub), e `run-job.sh compile` confirmou duas vezes
+   que o `initContainer seed-includes` entrega os zips certos (`Precompilation... ok` nas duas).
+   Nenhum `compile` terminou com sucesso total ainda (fonte de teste colidiu com função já
+   existente no `custom.rpo` — não é falha do include), mas isso não bloqueia mais nada; próximo
+   `compile` real com fonte sem colisão deve fechar limpo. Ver ADR 0010.
 
 **Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
 `docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
@@ -119,10 +118,34 @@ Updater (mesma razão do `appserver-dev-worker`: a `compile-job` fica fora do Ku
 bumpada manualmente). `scripts/appserver-patch/README.md` atualizado — o passo de depósito
 manual dos includes não existe mais.
 
-**Validado apenas client-side** (`kubectl kustomize base/` e `kubectl apply --dry-run=client -f`
-nos dois manifestos editados, sem erro) — **NÃO validado com um `compile` real ainda**. Faltam
-dois passos antes de considerar fechado: configurar os secrets do Docker Hub no repo novo (CI
-nunca rodou) e rodar `run-job.sh compile` de ponta a ponta. Ver checklist no topo.
+**Validado de ponta a ponta, mesmo dia**. Usuário configurou `DOCKERHUB_USERNAME`/
+`DOCKERHUB_TOKEN` no repo novo (token do Docker Hub recriado — o original tinha sido perdido,
+nunca é recuperável, nem em secrets do GitHub nem em tokens do Docker Hub, por design). Esclarecido
+de passagem: repo privado + Actions secrets sempre funcionaram normalmente em qualquer plano —
+não existe restrição alguma aí; o único limite real do plano gratuito (minutos de runner
+*hospedado pelo GitHub* em repo privado) nunca chegou a se aplicar, porque todo o fleet usa
+`runs-on: self-hosted` (a própria máquina do usuário, já registrada como runner desde antes deste
+repo, confirmado com um run antigo de sucesso em `docker-protheus-rpo`).
+
+O run inicial (do push do commit `1d4b8d0`) tinha falhado no login do Docker Hub, como esperado
+sem secrets — `gh run rerun` depois de configurados os secrets, sucesso em 41s.
+`rodrigomicrosiga/protheus-includes-dev:0.0.1` confirmada publicada via `docker manifest
+inspect`.
+
+`run-job.sh compile` rodado duas vezes com fonte real (fornecido pelo usuário,
+`teste-devops.prw`, usa `#include 'totvs.ch'`) — nas duas, `Extraindo includes [advpl]`/
+`[tlpp]` e `ADVPL Preprocessor: Precompilation... ok`, confirmando que o `initContainer
+seed-includes` funciona. Nenhuma das duas terminou com sucesso total: a primeira tentativa
+tinha um `teste.prw` antigo (de 17/09) ainda na fila junto, colidindo por nome de função
+(`U_TESTE`) com o fonte novo — removido, segunda tentativa rodou só com `teste-devops.prw`, mas
+a mesma função já estava gravada no `custom.rpo` desde a compilação de 17/09, então o compilador
+rejeitou de novo (`Duplicated function`, correto — o RPO customizado é incremental, não é bug).
+Rollback automático confirmado nas duas vezes: hash do `custom.rpo` inalterado
+(`b390e7ce...`), `appserver-core`/`rest`/`telnet` religados sozinhos pelo `run-job.sh`,
+`Synced`/`Healthy` depois. Decisão registrada com o usuário: dar a infra por validada sem
+insistir num `compile` 100% verde agora — a parte que importava (entrega dos includes) já está
+provada; um `compile` limpo fica pro próximo fonte real sem colisão de nome. Detalhe completo em
+`docs/adr/0010-includes-seed-efemero-initcontainer.md` (status atualizado).
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -333,17 +356,17 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
 
 ## Backlog aberto, por prioridade
 
-1. **`docker-protheus-includes` — implementado em 2026-09-18, falta validar ao vivo**: repo
-   criado (`github.com/rodrigomicrosiga-devops/docker-protheus-includes`, privado) e cluster
-   alterado (`appserver-compile-job.yaml`), ver "Onde paramos" no topo e ADR 0010 pro desenho
-   (seed efêmero via `initContainer` + `emptyDir`, não Deployment em standby). Pendências:
-   - **Bloqueante pro CI**: configurar `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` como secrets do
-     repo novo no GitHub — sem isso o workflow falha no login do Docker Hub, a imagem
-     `rodrigomicrosiga/protheus-includes-dev:0.0.1` nunca é publicada. Ação do usuário (secrets
-     não são algo que se configura por CLI sem expor credencial).
-   - **Validação ao vivo pendente**: depois do CI publicar, rodar
-     `scripts/appserver-patch/run-job.sh compile` com fonte real e confirmar que o
-     `code_compiler.sh` acha os dois `includes.zip` entregues pelo `initContainer`.
+1. **`docker-protheus-includes` — implementado E validado em 2026-09-18**: repo criado
+   (`github.com/rodrigomicrosiga-devops/docker-protheus-includes`, privado), CI publicou
+   `protheus-includes-dev:0.0.1` no Docker Hub, cluster alterado (`appserver-compile-job.yaml`)
+   e validado ao vivo com `run-job.sh compile` (duas execuções, `initContainer seed-includes`
+   entregou os zips corretamente nas duas, `code_compiler.sh` extraiu e resolveu `#include`
+   sem erro). Ver "Onde paramos" no topo e ADR 0010 pro desenho completo (seed efêmero via
+   `initContainer` + `emptyDir`, não Deployment em standby). Pendências residuais, menores:
+   - Nenhum `compile` real terminou com `Errors(0)` ainda — o fonte de teste usado colidia com
+     uma função já existente no `custom.rpo` (`U_TESTE`, de uma compilação de 17/09), rejeição
+     correta do compilador, não falha do include. Resolve sozinho no próximo `compile` com fonte
+     sem colisão de nome — não é uma pendência de infraestrutura.
    - **`advpl`**: revisão nova já identificada e baixada (`~/Downloads/26-08-07-P12_INCLUDES.ZIP`,
      157 arquivos vs. 155 em uso) — decisão de aplicar ou não fica pro usuário, procedimento
      documentado no README do repo novo.
