@@ -41,7 +41,7 @@ metadata:
   name: postgres
   namespace: protheus-devops
 spec:
-  replicas: 1
+  replicas: 0
   strategy:
     type: Recreate
   selector:
