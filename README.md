@@ -32,7 +32,7 @@ graph TD
         subgraph DELIVERY_LAYER["Camada de Entrega (Sidecars sem Service)"]
             WEBAPP_POD["Pod: WebApp <br> v10.2.1"] --> WEBAPP_PVC["PVC: webapp-shared-pvc"]
             PRINTER_POD["Pod: Printer <br> v3.0.5"] --> PRINTER_PVC["PVC: printer-shared-pvc"]
-            WEBAGENT_POD["Pod: WebAgent <br> v1.1.1 (Linux x64)"] --> WEBAGENT_PVC["PVC: webagent-shared-pvc"]
+            WEBAGENT_POD["Pod: WebAgent <br> v1.1.1 (Win/macOS/Linux)"] --> WEBAGENT_PVC["PVC: webagent-shared-pvc"]
         end
 
         subgraph SEED_LAYER["Camada de Seeds (Fase C -- artefatos proprietários)"]
@@ -119,7 +119,7 @@ kubectl port-forward deployment/license 5555:5555 -n protheus-devops
 
 5. `WebApp`, `Printer` e `WebAgent` (sidecars de entrega)
 
-`webapp`, `printer` e `webagent` são binários com versionamento independente do AppServer — cada um roda numa imagem exclusiva justamente para poder ser atualizado sozinho (nova versão do WebApp, Printer ou WebAgent) sem precisar rebuildar ou reiniciar o AppServer. Nenhum expõe porta: o único trabalho de cada um é extrair seus arquivos para um `PersistentVolumeClaim` dedicado (`webapp-shared-pvc`, `printer-shared-pvc`, `webagent-shared-pvc`) e ficar em standby. `webagent` é diferente dos outros dois numa coisa: é um utilitário **client-side** (roda na estação do usuário final, não no servidor) — este Pod só entrega o instalador (`.deb`/`.rpm`, hoje só Linux x64) pro navegador baixar através do AppServer, nunca executa o WebAgent em si. Não há verificação via `port-forward` aqui — a validação é conferir que os arquivos foram extraídos:
+`webapp`, `printer` e `webagent` são binários com versionamento independente do AppServer — cada um roda numa imagem exclusiva justamente para poder ser atualizado sozinho (nova versão do WebApp, Printer ou WebAgent) sem precisar rebuildar ou reiniciar o AppServer. Nenhum expõe porta: o único trabalho de cada um é extrair seus arquivos para um `PersistentVolumeClaim` dedicado (`webapp-shared-pvc`, `printer-shared-pvc`, `webagent-shared-pvc`) e ficar em standby. `webagent` é diferente dos outros dois numa coisa: é um utilitário **client-side** (roda na estação do usuário final, não no servidor) — este Pod só entrega os instaladores (Windows x86/x64 `.exe`, macOS Universal/x64 `.dmg`, Linux `.deb`/`.rpm`, e `.msi` pro fluxo de GPO à parte) pro navegador baixar através do AppServer, nunca executa o WebAgent em si. Não há verificação via `port-forward` aqui — a validação é conferir que os arquivos foram extraídos:
 
 ```bash
 kubectl exec deployment/webapp -n protheus-devops -- ls /mnt/webapp_shared
@@ -168,7 +168,9 @@ A interface fica disponível em `http://localhost:7019`. A partir daí, a config
 
 ### 🔄 GitOps: Argo CD + Image Updater
 
-Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal` + `prune`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando por **digest** as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev`, `printer-dev`, `smartview-dev`, `appserver-dev` (uma entrada cobre core/rest/telnet — mesma imagem) e as 3 imagens de seed (`protheus-rpo-dev`, `protheus-system-dev`, `protheus-systemload-dev`) — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente. `appserver-dev-worker` (usado só pelos Jobs `worker`/`compile`, fora do Kustomize) fica de fora de propósito — sem manifesto rastreado pelo Kustomize, a entrada ficaria inerte; a tag é atualizada manualmente nos dois Jobs quando necessário.
+Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal` + `prune`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando por **digest** as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev`, `printer-dev`, `webagent-dev`, `smartview-dev`, `appserver-dev` (uma entrada cobre core/rest/telnet — mesma imagem) e as 3 imagens de seed (`protheus-rpo-dev`, `protheus-system-dev`, `protheus-systemload-dev`) — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente. `appserver-dev-worker` (usado só pelos Jobs `worker`/`compile`, fora do Kustomize) fica de fora de propósito — sem manifesto rastreado pelo Kustomize, a entrada ficaria inerte; a tag é atualizada manualmente nos dois Jobs quando necessário.
+
+**Achado em 2026-09-18**: o Image Updater faz pull anônimo do Docker Hub pra resolver esses digests, sem nenhuma credencial configurada em `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml` — sob uso intenso (vários bumps na mesma sessão), isso esbarra no rate limit anônimo do Docker Hub e trava a resolução de TODAS as imagens acima até o limite liberar (horas) ou até credenciais serem adicionadas. Sem risco ao cluster (o `Application` continua `Synced`/`Healthy` na última versão resolvida), só atrasa a propagação automática de bumps novos. Detalhe e correção recomendada em `docs/HANDOFF.md` (backlog) e `docs/adr/0014-webagent-sidecar-de-entrega.md`.
 
 Os manifestos desses dois recursos (`Application` e `ImageUpdater`) ficam versionados em [`argocd/`](argocd/), pois eles vivem no namespace `argocd` do cluster, fora do que o Kustomize em `base/` gerencia — sem isso, a integração entre o Argo CD e este repositório existiria apenas como estado vivo do cluster, sem nenhum registro em git.
 

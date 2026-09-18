@@ -4,7 +4,45 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-18, parte 2)
+## Onde paramos (fim da sessão de 2026-09-18, parte 3)
+
+**Verificar ao retomar, antes de qualquer coisa nova**:
+
+1. **WebAgent multi-SO — Compose validado, k8s ainda não propagou**. A pedido do usuário,
+   `docker-protheus-webagent` ganhou Windows (x86/x64) e macOS (Universal/x64) além do Linux já
+   existente — commits `f20d454` (Linux) e `5439a20` (multi-SO) no repo, `docker-protheus-appserver`
+   commits `050ac72`/`a953e2a` (detecção dinâmica das 5 chaves `[WEBAGENT]`). CI publicou os dois
+   sob as MESMAS tags (`webagent-dev:1.1.1`, `appserver-dev:24.3.1.9`) com digests novos.
+   **Validado ao vivo só via Compose**, com as imagens reais publicadas no Docker Hub — `.ini`
+   com as 5 chaves corretas, `.msi` disponível no volume mas de propósito fora do `.ini` (sem
+   chave documentada, fluxo GPO é outro). **k8s ainda está rodando os digests antigos** — ver
+   item abaixo, achado novo que bloqueia a propagação, não é falha do trabalho do webagent em si.
+2. **Achado novo, fleet-wide: `argocd-image-updater` sem autenticação no Docker Hub.**
+   Descoberto ao tentar confirmar a propagação do item 1: `kubectl set image` manual foi revertido
+   pelo `selfHeal` do Argo CD (esperado — o override cacheado em
+   `Application.spec.source.kustomize.images` ainda apontava pro digest antigo). Investigando por
+   que o Image Updater não tinha atualizado o override sozinho, os logs do
+   `argocd-image-updater-controller` mostram `toomanyrequests: You have reached your
+   unauthenticated pull rate limit` em `docker.io` há vários ciclos de poll seguidos — afeta
+   TODAS as ~11 imagens rastreadas, não só `webagent`/`appserver`. `scripts/cluster-bootstrap/
+   helm-values/argocd-image-updater.yaml` não tem seção de credenciais de registry (só
+   `resources.requests`). Decisão tomada: **não forcei o override do Application diretamente**
+   (cheguei a ver um terceiro valor de digest, `e87ee71e...`, inconsistente com os dois que eu
+   mesmo confirmei via `docker manifest inspect` — risco real de aplicar o digest errado).
+   Cluster confirmado estável do jeito que está (`Synced`/`Healthy`, 171 tabelas, todos os pods
+   `Running`) rodando a versão anterior do webagent/appserver (funcional, só sem o multi-SO
+   ainda). Ver item novo no backlog abaixo — precisa de credencial real
+   (`DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN`, já usada em todo o resto da frota) que só o usuário
+   pode fornecer.
+3. **Quando isso resolver** (rate limit expira sozinho em horas, ou a autenticação for
+   configurada), confirmar: `kubectl get pods -n protheus-devops -o
+   custom-columns='POD:.metadata.name,IMAGE:.spec.containers[*].image'` deve mostrar os appservers
+   em `appserver-dev:24.3.1.9@sha256:8a7ed2af...` e `webagent` em
+   `webagent-dev:1.1.1@sha256:dcf39033...` (digests confirmados via `docker manifest inspect` no
+   Docker Hub); só então repetir o teste `kubectl exec deploy/appserver-core -- grep -A8 WEBAGENT
+   appserver.ini` esperando as 5 chaves (antes só tinha 2, `Linux_x64_deb`/`Linux_x64_rpm`).
+
+## Histórico condensado da sessão de 2026-09-18, parte 2
 
 **Verificar ao retomar, antes de qualquer coisa nova**:
 
@@ -315,6 +353,28 @@ pra validar seria repetir o tipo de suposição não-testada que este projeto te
 todo). Arquitetura já preparada pra crescer sem redesenho quando houver necessidade real — ver
 README do `docker-protheus-webagent`.
 
+**WebAgent estendido pra multi-SO** (mesmo dia, rodada seguinte): usuário já tinha baixado os
+pacotes de Windows (x86/x64) e macOS (Universal + x64) e colocado no diretório do repo
+`docker-protheus-webagent`. `Dockerfile` reescrito pra extrair `.zip`/`.dmg` além de `.tar.gz`
+(builder multi-estágio com `find -iname` por padrão, não nome fixo); `.gitignore` corrigido
+**antes** do primeiro `git add` pra cobrir `*.ZIP`/`*.DMG` além de `*.TAR.GZ` (só cobria
+`.tar.gz` até então — pego a tempo, ~165MB de binário proprietário não chegou a ir pro git);
+workflow de CI reescrito pra resgatar todos os formatos de até 3 diretórios candidatos.
+`docker-protheus-appserver/entrypoint.sh` ganhou detecção das 5 chaves (`Windows_x86`,
+`Windows_x64`, `Darwin_universal`, `Linux_x64_deb`, `Linux_x64_rpm`) via `find -maxdepth 1
+-iname`, preferindo o `.dmg` com `universal` no nome quando mais de um está presente. Os
+`.msi` (fluxo de distribuição via GPO/Active Directory, documentado na Central de Downloads como
+pacote separado) são entregues no volume mas de propósito **não** entram no `.ini` — não existe
+chave documentada pra eles, e o fluxo de auto-download do WebApp não usa MSI.
+
+Validado ao vivo só no Compose, com as imagens reais publicadas (`webagent-dev:1.1.1`
+`sha256:dcf39033...`, `appserver-dev:24.3.1.9` `sha256:8a7ed2af...`): `.ini` gerado com as 5
+chaves corretas, todos os arquivos no volume compartilhado, boot limpo. Tentativa de confirmar a
+mesma coisa no k8s esbarrou num achado novo e maior — ver "Onde paramos" no topo (item 2): o
+`argocd-image-updater` está sem autenticação no Docker Hub e sendo rate-limited como cliente
+anônimo, afetando a frota inteira, não só este componente. Cluster permanece estável rodando os
+digests anteriores (funcionais, só sem o multi-SO) até esse achado ser resolvido.
+
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
 Retomada do handoff de 17/09. Item 0 do backlog (atualização de binários TOTVS) fechado no lado
@@ -570,10 +630,28 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    - **Achado real**: numa subida simultânea do zero, `appserver-core` pode gerar o `.ini` antes
      do sidecar terminar de provisionar (mesma condição de corrida silenciosa que já existe pra
      `webapp`/`printer`, não é bug novo) — resolve com um restart, irrelevante em uso real.
-   - **Windows/macOS**: não implementado de propósito — sem arquivo real pra validar o
-     Dockerfile (formato `.zip`, não `.tar.gz`) nem a lógica de detecção (`Windows_x86` vs
-     `Windows_x64`, ambíguos por extensão). Arquitetura já preparada pra adicionar sem
-     redesenho quando houver necessidade real e artefato pra testar — ver README do repo novo.
+   - **Windows/macOS — implementado e validado em rodada seguinte, mesmo dia**: usuário
+     forneceu os artefatos reais (Windows x86/x64 `.zip`, macOS Universal/x64 `.dmg`).
+     `Dockerfile` estendido pra extrair `.zip`/`.dmg`, `entrypoint.sh` do `appserver` detecta as
+     5 chaves dinamicamente (`Windows_x86`/`Windows_x64`/`Darwin_universal`/`Linux_x64_deb`/
+     `Linux_x64_rpm`), `.msi` entregue no volume mas de propósito fora do `.ini` (fluxo GPO
+     separado, sem chave documentada). Validado ao vivo via Compose com imagens reais
+     publicadas. **Propagação pro k8s bloqueada** por um achado novo — ver item 4 abaixo.
+4. **NOVO — `argocd-image-updater` sem autenticação no Docker Hub (achado em 2026-09-18,
+   fleet-wide, não específico do webagent)**: o controller faz pull anônimo do Docker Hub pra
+   resolver digest de TODAS as ~11 imagens rastreadas (`argocd/image-updater.yaml`), e está
+   sendo rate-limited (`toomanyrequests: You have reached your unauthenticated pull rate
+   limit`) há vários ciclos de poll seguidos. Efeito concreto observado: o override de digest em
+   `Application.spec.source.kustomize.images` ficou parado numa versão antiga do
+   `appserver-dev`/`webagent-dev`, e o `selfHeal` reverte qualquer `kubectl set image` manual de
+   volta pro valor cacheado (comportamento correto do Argo CD, só expõe o problema de raiz).
+   Sem risco pro cluster (segue `Synced`/`Healthy`, rodando a versão anterior, funcional) — mas
+   bloqueia a atualização automática de imagem até resolver. Correção recomendada: adicionar
+   credenciais do Docker Hub (mesmo par `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` já usado em toda
+   a frota via CI) em `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml`, seguindo
+   o formato de `registries`/secret de pull do chart `argocd-image-updater` — sintaxe exata do
+   chart ainda não pesquisada, fica pro próximo passo real. Precisa de credencial que só o
+   usuário tem/gera; não é algo que se resolve só com código.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
