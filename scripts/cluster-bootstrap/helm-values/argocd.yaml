@@ -1,0 +1,38 @@
+applicationSet:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+configs:
+  params:
+    server.insecure: true
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+dex:
+  enabled: false
+notifications:
+  enabled: false
+redis:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+redis-ha:
+  enabled: false
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+server:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi

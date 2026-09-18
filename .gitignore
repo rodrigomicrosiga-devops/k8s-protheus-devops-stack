@@ -3,3 +3,12 @@
 # scripts/secrets/decrypt.sh -- o backup de verdade é base/postgres-secret.env.gpg (versionado,
 # ver docs/adr/0011-cofre-local-gpg-secrets-plaintext.md).
 base/postgres-secret.env
+
+# Mesma trava -- artefatos de bootstrap com credencial/chave real em texto plano.
+# Backup de verdade fica no .gpg correspondente (versionado).
+scripts/cluster-bootstrap/sealed-secrets-keys-backup.yaml
+scripts/cluster-bootstrap/helm-values/*.yaml
+!scripts/cluster-bootstrap/helm-values/argocd.yaml
+!scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml
+!scripts/cluster-bootstrap/helm-values/falco.yaml
+!scripts/cluster-bootstrap/helm-values/sealed-secrets.yaml

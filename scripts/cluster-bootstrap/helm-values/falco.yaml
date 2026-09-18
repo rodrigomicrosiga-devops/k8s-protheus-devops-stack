@@ -1,0 +1,14 @@
+customRules:
+  rules-argocd-exceptions.yaml: |-
+    # Argo CD (server/application-controller/applicationset-controller) fala com a API do K8s
+    # legitimamente o tempo todo - é a função dele. Sem essa exceção, a regra padrão
+    # "Contact K8S API Server From Container" dispara Notice a cada request, gerando ruído.
+    - macro: user_known_contact_k8s_api_server_activities
+      condition: (k8s.ns.name="argocd")
+driver:
+  kind: modern_ebpf
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+tty: false
