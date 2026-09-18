@@ -91,6 +91,19 @@ docker run -d \
   "${CMD_ARGS[@]}"
 
 echo "✅ $NODE recriado com --cgroupns host."
+
+# Achado real (drill de 2026-09-18, ADR 0013): containers recriados via
+# `docker run` puro nascem com o mount raiz em propagação `private`, não
+# `shared`/`slave` -- diferente de como o k3d cria os nodes internamente
+# via SDK do Docker. Sem isso, qualquer coisa que monte `/` do node
+# (ex.: prometheus-node-exporter) falha com "path / is mounted on / but
+# it is not a shared or slave mount". Não é algo capturável via
+# `docker inspect` (não é volume/env/label), por isso não dava pra
+# descobrir só olhando o container antigo -- só apareceu ao testar um
+# workload real que precisa disso.
+echo "=== Corrigindo propagação do mount raiz (achado real do drill, ver ADR 0013) ==="
+docker exec "$NODE" mount --make-rshared /
+
 echo
 echo "Próximos passos manuais (mesma lógica de scripts/k3d-nodes/README.md):"
 echo "1. Apagar o Secret de senha de registro do node, se existir:"

@@ -46,7 +46,44 @@ Avaliado com o usuário: sem dado de produção em risco, decisão de executar o
 
 ## Validação
 
-<!-- Preencher depois de executar o drill ao vivo -->
+**Drill completo executado ao vivo em 2026-09-18 — sucesso total.** `k3d cluster delete` real,
+seguido da receita completa (00→04), sem atalhos. Validação final idêntica à linha de base
+capturada antes de destruir: 171 tabelas no Postgres (recovery automático de WAL — o
+`k3d cluster delete` não faz shutdown limpo do Postgres, o container simplesmente some; o
+`pg_dump` de segurança feito antes acabou não sendo necessário, mas foi o certo a fazer), hash
+do `tttm120.rpo`/`custom.rpo` idênticos, os 4 `SealedSecret` (`postgres-secret`,
+`smartview-secret`, `regcred`, `appserver-upddistr-secret`) decriptados corretamente com as
+chaves restauradas, os 2 nodes `Ready` com `cgroupns=host`, `serverlb` sem a porta 7890 desde o
+nascimento, e todos os 7 componentes Helm + os 12 pods de `protheus-devops` + Falco + monitoring
++ Velero/MinIO no ar, `Synced`/`Healthy`.
+
+**Dois achados reais, não previstos, encontrados só ao executar de verdade** (motivo de existir
+uma seção de validação, não só a decisão em teoria):
+
+1. **Dependência circular nova, diferente da do ADR 0012**: o hook `PreSync` `smartview-db-init`
+   depende de `postgres-secret` (`envFrom.secretRef`) — mas `postgres-secret` é um `SealedSecret`
+   comum de `Sync`, não um hook, então **nunca existe a tempo** num bootstrap genuinamente do
+   zero (no cluster antigo isso nunca apareceu porque `postgres-secret` já existia desde
+   2026-07-26). Mesmo mecanismo de trava do ADR 0012 (hook `PreSync` esperando algo que só existe
+   depois dele na mesma operação), causa raiz diferente (desta vez é o `Secret`, não o Postgres
+   em si — mas o Postgres também trava atrás, pela mesma razão de sempre). Desbloqueado com o
+   mesmo padrão já validado: aplicar `postgres-secret.sealed.yaml` e depois `postgres.yaml`
+   diretamente (`kubectl apply -f`, bypass pontual do Argo CD), extraindo o `ConfigMap`
+   `postgres-config-<hash>` via `kubectl kustomize base/` primeiro (mesmo problema de hash do
+   `configMapGenerator` do ADR 0012). **Ação de follow-up real**: mover `postgres-secret` (e
+   possivelmente `postgres-config`) pra dentro do próprio hook `PreSync` do `smartview-db-init`
+   como dependência declarada, ou remover a dependência do hook em `postgres-secret` — não
+   corrigido nesta sessão, seria mudança de manifesto fora do escopo do drill de validação.
+2. **Nodes recriados nascem com o mount raiz em propagação `private`, não `shared`** —
+   quebra o `prometheus-node-exporter` (monta `/` do node, exige `shared`/`slave`,
+   erro: `"path / is mounted on / but it is not a shared or slave mount"`). Não é algo visível
+   via `docker inspect` (não é um volume/env/label capturável pelo `01-fix-cgroupns.sh`) — é
+   como o `k3d` cria os containers internamente via SDK do Docker, não replicável 1:1 por
+   `docker run` puro. Corrigido ao vivo, sem precisar recriar o container:
+   `docker exec <node> mount --make-rshared /` nos dois nodes, depois `kubectl delete pod` nos
+   `node-exporter` pra remontar com a propagação corrigida. **Já incorporado no
+   `01-fix-cgroupns.sh`** (rodado automaticamente no fim do script, mesmo dia) — o próximo drill
+   não precisa do passo manual.
 
 ## Consequências
 - Fecha o item 3 do backlog — receita completa versionada, testada ao vivo (ver Validação).

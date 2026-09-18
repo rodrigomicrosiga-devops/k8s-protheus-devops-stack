@@ -33,9 +33,7 @@
    `postgres-secret.env` (ADR 0011) e recriação dos 3 PVs legados com `nodeAffinity` (ADR 0012).
    Verificar: `kubectl get pv postgres-pv webapp-shared-pv printer-shared-pv` deve mostrar os 3
    com `nodeAffinity` preenchida (não vazia) e `Bound`; os 6 consumidores (`postgres`, `webapp`,
-   `printer`, `appserver-core`/`-rest`/`-telnet`) `Running`, `1/1`, sem restart novo. Achado
-   registrado no ADR 0012 (seção "obstáculos reais") que é relevante quando o item 3 (receita de
-   cluster do zero, renumerado) for feito — ler antes de planejar.
+   `printer`, `appserver-core`/`-rest`/`-telnet`) `Running`, `1/1`, sem restart novo.
 6. **Item 4 (antigo) do backlog fechado — porta `7890` removida do `serverlb`**: `k3d cluster
    edit protheus-cluster --port-delete 7890:7890@loadbalancer` recriou o `serverlb` sem o
    mapeamento. Verificar: `docker ps` do `serverlb` deve mostrar só `80/tcp, ...->6443/tcp` (sem
@@ -44,6 +42,17 @@
    `serverlb`). Se o `serverlb` for recriado do zero por outro caminho no futuro (ex.: `k3d
    cluster delete` + `create`), essa remoção não se propaga sozinha — teria que rodar o mesmo
    `--port-delete` de novo, ou já criar sem a porta desde o início.
+7. **Item 3 (antigo, "cluster do zero") fechado — DRILL AO VIVO EXECUTADO, não só receita
+   documentada**: `k3d cluster delete protheus-cluster` real, cluster inteiro recriado do zero
+   (rede/nodes/volumes k3s) via `scripts/cluster-bootstrap/` (ADR 0013), sucesso total. Verificar
+   ao retomar: `kubectl get nodes` (2 `Ready`), `kubectl get applications -n argocd
+   protheus-devops-stack` (`Synced`/`Healthy`), os 12 pods de `protheus-devops` mais
+   Falco/monitoring/Velero-MinIO no ar. Dois achados reais novos, registrados no ADR 0013 (não
+   eram conhecidos antes de executar de verdade): hook `smartview-db-init` também trava contra
+   `postgres-secret` num bootstrap do zero (mesma família de bug do ADR 0012, causa diferente,
+   correção manual documentada, **não corrigida no manifesto ainda**); nodes recriados nascem com
+   mount raiz em propagação `private` (quebra `node-exporter`) — **esse já corrigido dentro do
+   próprio `01-fix-cgroupns.sh`**, não precisa de passo manual no próximo drill.
 
 **Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
 `docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
@@ -102,7 +111,7 @@ mas isso é só de onde foram copiados — não é o pacote TOTVS de origem, e n
 `P12_INCLUDES.ZIP` do advpl (que tem `.th` só que prefixados `fw-tlpp-*`, schema diferente).
 Origem do `tlpp` continua aberta. Detalhe completo no item 1 do backlog abaixo.
 
-**`webagent` adicionado ao backlog (item 4)** a pedido do usuário — componente novo
+**`webagent` adicionado ao backlog (item 3)** a pedido do usuário — componente novo
 (`docker-protheus-webagent` não existe ainda), artefato já baixado desde 02/07
 (`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) mas sem nenhum
 trabalho de containerização começado.
@@ -197,8 +206,9 @@ ConfigMap com hash que o apply direto não reescreve) até o hook conseguir comp
 Argo CD terminar a sincronização normalmente. Nada disso afetou os outros componentes do cluster
 (dbaccess/license/smartview/seeds com os mesmos restarts de antes) nem os dados reais (Retain
 protegeu os 3 hostPaths pelos dois ciclos de delete+recreate). Tudo documentado em detalhe no ADR
-0012 ("Obstáculos reais enfrentados") — leitura obrigatória antes de tentar o item 3 (renumerado,
-receita de cluster do zero), que vai bater no mesmo problema em escala maior.
+0012 ("Obstáculos reais enfrentados") — previsão confirmada na prática, mesmo dia: o drill do
+cluster do zero (item 3 de então, fechado nesta mesma sessão — ver ADR 0013) bateu exatamente
+nesse tipo de problema, só que com `postgres-secret` no lugar do Postgres em si.
 
 **Item 4 (antigo) do backlog fechado — porta `7890` removida do `serverlb`**: k3d tem suporte
 nativo (experimental) pra editar port mappings de um cluster já existente sem recriar
@@ -211,8 +221,55 @@ o capô, o k3d renomeia o `serverlb` antigo, cria um novo sem o mapeamento, para
 de antes da operação). Único porto aberto no `serverlb` agora: `6443` (API do k8s). **Não é uma
 mudança persistida no git** — é estado do container Docker do k3d, fora do que `base/`/
 `scripts/k3d-nodes/` gerenciam (o próprio `scripts/k3d-nodes/README.md` já registrava que o
-`serverlb` não é recriado por aqueles scripts). Se o cluster inteiro for recriado do zero no
-futuro (item 3), essa remoção não se propaga sozinha — fica registrado pro item 3 também.
+`serverlb` não é recriado por aqueles scripts). Confirmado no drill do cluster do zero (mesma
+sessão, ver abaixo): a receita nova (`scripts/cluster-bootstrap/00-create-cluster.sh`) já nasce
+sem a porta 7890 desde o primeiro `k3d cluster create`, então essa remoção não precisou ser
+repetida manualmente.
+
+**Item 3 (antigo) do backlog fechado — drill completo de recriar o cluster do zero, executado ao
+vivo** (ADR 0013). Usuário optou por fazer o drill de verdade, não só documentar a receita.
+Inventário prévio: `helm list -A` + `helm get values` recuperaram os `values.yaml` reais dos 7
+componentes instalados fora do Kustomize direto do storage do Helm — não precisou reconstruir de
+memória. Dois com credencial em texto plano (`kube-prometheus-stack`: senha do Grafana;
+`minio`/`velero`: credenciais do MinIO) foram pro cofre GPG do ADR 0011, os outros 4 sem segredo
+foram versionados direto. A chave do `sealed-secrets` (2 chaves ativas por rotação) foi
+backupeada e criptografada da mesma forma — sem ela, os 4 `SealedSecret` já commitados
+(`postgres-secret`, `smartview-secret`, `regcred`, `appserver-upddistr-secret`) nunca mais
+decriptariam num cluster novo. `pg_dump` de segurança feito antes, por barato, mesmo o hostPath
+de dados reais (`/media/rodrigo/dados/k8s-volume/`) sendo físico do host e sobrevivendo a
+`k3d cluster delete` por natureza (confirmado na prática).
+
+Achado real antes de escrever qualquer script: `k3d cluster create` **não tem flag nativa pra
+`--cgroupns host`** — a receita precisou de duas fases (criar cluster normal, depois recriar os
+2 containers de node com o fix, generalizando a lógica de `scripts/k3d-nodes/`/ADR 0008 pra
+descobrir volumes/env/labels dinamicamente via `docker inspect`, já que uma receita "do zero" não
+pode depender de IDs de volume fixos de um cluster que já não existe mais).
+
+Drill executado: `k3d cluster delete protheus-cluster` de verdade, seguido da receita completa
+(`scripts/cluster-bootstrap/00` a `04`). **Sucesso total**, validado contra a linha de base
+capturada antes de destruir: 171 tabelas no Postgres (idêntico — o Postgres achou o data
+directory existente no hostPath sobrevivente e fez recovery automático de WAL, não precisou do
+`pg_dump`), hash do `tttm120.rpo`/`custom.rpo` idênticos, os 4 `SealedSecret` decriptados
+corretamente com as chaves restauradas, 2 nodes `Ready` com `cgroupns=host`, `serverlb` sem a
+7890 desde o nascimento, e todos os 12 pods de `protheus-devops` + Falco + monitoring + Velero/
+MinIO no ar, `Synced`/`Healthy`.
+
+Dois achados reais **só descobertos ao executar de verdade** (motivo de valer a pena ter feito o
+drill ao vivo, não só a receita em teoria):
+1. **Dependência circular nova**: o hook `PreSync` `smartview-db-init` depende de
+   `postgres-secret`, que é `SealedSecret` comum de `Sync`, não hook — nunca existe a tempo num
+   bootstrap genuinamente do zero (no cluster antigo nunca apareceu porque `postgres-secret` já
+   existia desde 26/07). Desbloqueado com o mesmo padrão do ADR 0012 (`kubectl apply -f` direto
+   nos recursos que faltavam). **Não corrigido no manifesto** — fica como follow-up real (mover a
+   dependência do hook, ou remover), registrado no ADR 0013.
+2. **Nodes recriados nascem com o mount raiz em propagação `private`**, quebrando o
+   `prometheus-node-exporter` (que monta `/` do node). Não é algo visível via `docker inspect` —
+   é como o k3d cria containers internamente, não replicável 1:1 por `docker run` puro. Corrigido
+   ao vivo (`mount --make-rshared /`) e **já incorporado no `01-fix-cgroupns.sh`** — o próximo
+   drill não precisa mais do passo manual.
+
+Detalhe completo (passo a passo real, achados, follow-ups) em
+`docs/adr/0013-cluster-bootstrap-do-zero.md` e `scripts/cluster-bootstrap/README.md`.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -452,17 +509,7 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    Compose e k8s juntos (mesma senha nos dois, por decisão deliberada), reabrindo a
    padronização de 16/09 sem motivo novo. Detalhe completo em
    `docs/adr/0011-cofre-local-gpg-secrets-plaintext.md`.
-3. **Ainda sem receita para recriar o cluster do zero** (rede Docker + volumes nomeados
-   novos) — só existe receita para recriar o *container* de um node já existente em cima de
-   volumes que já existem (`scripts/k3d-nodes/`, fechado em 2026-09-17, ver ADR 0008). Um
-   cluster perdido por inteiro (rede + todos os volumes) ainda exigiria reconstrução manual,
-   perdendo a chave do `sealed-secrets` e os namespaces fora do git (`argocd`, `falco`,
-   `monitoring`, `velero`). README documenta um DR que hoje não cobre esse caso. **Achado
-   relevante de 2026-09-18** (ADR 0012, ao recriar os PVs legados do item 3 antigo): um drill de
-   DR completo vai bater no mesmo problema de dependência circular entre o hook `PreSync`
-   `smartview-db-init` e o Postgres pausado/recriado — ver "Obstáculos reais enfrentados" no
-   ADR 0012 antes de planejar este item.
-4. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
+3. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
    fora de escopo tanto do Compose quanto deste cluster até hoje — é o componente que faltaria
    pra expor o SmartClient via navegador (HTML5) sem instalação local, hoje só validado via
    SmartClient desktop nativo (`CORE_PORT_MULTI`). Artefato já baixado
@@ -546,6 +593,22 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
   `tr -d '\000' < arquivo | tail -c N` (descarta os nulos antes de cortar pelo fim). `docker logs`
   do container não ajuda aqui — o entrypoint não propaga a saída do `appsrvlinux` pro stdout do
   container além do banner inicial (OS/memory/container info); o log real está sempre no arquivo.
+- **Hooks `PreSync` que dependem de recursos comuns de `Sync` travam num bootstrap do zero** —
+  achado real duas vezes (ADR 0012, ADR 0013): `smartview-db-init` (hook `PreSync`) depende do
+  Postgres/`postgres-secret` (recursos de `Sync`, aplicados só depois que todos os hooks `PreSync`
+  terminam). Num cluster já rodando isso nunca aparece (os recursos já existiam de antes); só
+  aparece num cluster genuinamente novo ou quando o recurso dependente é pausado/removido de
+  propósito. Desbloqueio sempre pelo mesmo padrão: `kubectl apply -f` direto no recurso que falta
+  (bypass pontual do Argo CD), deixar o hook completar, deixar o resto do sync corrigir sozinho
+  depois (inclusive digests de imagem revertidos pelo apply direto). Nunca forçar
+  `argocd.argoproj.io/refresh=hard` sem necessidade — recria essa trava mesmo quando o `selfHeal`
+  passivo já teria resolvido o drift sem re-rodar hook nenhum.
+- **Um container de node k3d recriado via `docker run` puro nasce com o mount raiz em propagação
+  `private`**, não `shared`/`slave` como o k3d cria internamente via SDK do Docker — não é algo
+  visível em `docker inspect` (não é volume/env/label). Quebra qualquer workload que monte `/` do
+  node (ex.: `prometheus-node-exporter`, erro "not a shared or slave mount"). Fix:
+  `docker exec <node> mount --make-rshared /` depois de recriar — já incorporado em
+  `scripts/cluster-bootstrap/01-fix-cgroupns.sh`. Achado do drill de 2026-09-18 (ADR 0013).
 
 ## Convenção de nomenclatura (fechada em 2026-09-16)
 

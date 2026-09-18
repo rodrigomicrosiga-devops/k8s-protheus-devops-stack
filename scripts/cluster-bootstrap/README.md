@@ -1,7 +1,8 @@
 # Recriar o cluster `protheus-cluster` do zero
 
 Contexto completo em [`docs/adr/0013-cluster-bootstrap-do-zero.md`](../../docs/adr/0013-cluster-bootstrap-do-zero.md).
-Resolve o item 3 do backlog ([`docs/HANDOFF.md`](../../docs/HANDOFF.md)).
+Fechou o item "cluster do zero" do backlog ([`docs/HANDOFF.md`](../../docs/HANDOFF.md)) —
+drill executado ao vivo em 2026-09-18.
 
 ## O que isto é (e o que não é)
 
@@ -92,11 +93,28 @@ Ver ADR 0013 pro detalhe completo. Resumo:
 - O `serverlb` nasce **sem** a porta 7890 desde o primeiro `k3d cluster create` desta receita
   (`00-create-cluster.sh` já não mapeia) — diferente do cluster original, que precisou de um
   `k3d cluster edit --port-delete` depois (item 4 do backlog, já fechado).
-- O primeiro sync completo do Argo CD vai disparar o hook `PreSync` `smartview-db-init`, que
-  espera o Postgres responder. Num bootstrap do zero isso deve resolver sozinho (Postgres sobe
-  como parte do mesmo sync, sem pausa artificial) — mas se travar, ver ADR 0012 pros sintomas e
-  a receita de recuperação (não é a mesma causa do item 3/PVs, mas o mecanismo de trava é
-  idêntico).
+- **O primeiro sync completo do Argo CD TRAVA no hook `PreSync` `smartview-db-init`** — confirmado
+  ao vivo, não é hipótese. O hook depende de `postgres-secret` (`envFrom.secretRef`), mas esse é
+  um `SealedSecret` comum de `Sync`, não um hook — nunca existe a tempo num bootstrap
+  genuinamente do zero. Desbloqueio manual (bypass pontual do Argo CD, mesmo padrão do ADR 0012):
+  ```sh
+  kubectl apply -f base/postgres-secret.sealed.yaml
+  kubectl kustomize base/ | python3 -c "import sys,yaml
+  for d in yaml.safe_load_all(sys.stdin):
+      if d and d.get('kind')=='ConfigMap' and d['metadata']['name'].startswith('postgres-config'):
+          print(yaml.dump(d))" | kubectl apply -f -
+  kubectl apply -f base/postgres.yaml
+  kubectl patch deployment postgres -n protheus-devops --type json \
+    -p '[{"op":"replace","path":"/spec/template/spec/containers/0/envFrom/0/configMapRef/name","value":"<nome-com-hash-do-comando-acima>"}]'
+  ```
+  Depois disso o hook completa sozinho e o resto do sync segue normal (inclusive corrigindo o
+  digest da imagem do Postgres, que o `apply` direto tinha revertido pra tag solta). Ver ADR 0013
+  "Validação" pro relato completo. **Não corrigido no manifesto** (mover `postgres-secret` pra
+  dentro do hook, ou remover a dependência) — fica como follow-up real, fora do escopo deste
+  drill.
+- Nodes recriados por `01-fix-cgroupns.sh` **já corrigem sozinhos** a propagação do mount raiz
+  (`mount --make-rshared /`, rodado automaticamente no fim do script) — sem isso,
+  `prometheus-node-exporter` falha (achado real do drill de 2026-09-18, ver ADR 0013).
 - A primeira tentativa de instalar o Velero historicamente falhou
   (`VolumeSnapshotLocation` com `credential`/`provider` nulos) — o `helm upgrade --install` do
   script 04 já é idempotente e resolve na segunda passada sozinho.
