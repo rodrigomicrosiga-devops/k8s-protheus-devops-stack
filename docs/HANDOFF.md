@@ -36,6 +36,14 @@
    `printer`, `appserver-core`/`-rest`/`-telnet`) `Running`, `1/1`, sem restart novo. Achado
    registrado no ADR 0012 (seção "obstáculos reais") que é relevante quando o item 3 (receita de
    cluster do zero, renumerado) for feito — ler antes de planejar.
+6. **Item 4 (antigo) do backlog fechado — porta `7890` removida do `serverlb`**: `k3d cluster
+   edit protheus-cluster --port-delete 7890:7890@loadbalancer` recriou o `serverlb` sem o
+   mapeamento. Verificar: `docker ps` do `serverlb` deve mostrar só `80/tcp, ...->6443/tcp` (sem
+   `7890`); isso **não é persistido em nenhum manifesto deste repo** — é estado do container
+   Docker do k3d, fora do git (mesma natureza de `scripts/k3d-nodes/`, que não recria o
+   `serverlb`). Se o `serverlb` for recriado do zero por outro caminho no futuro (ex.: `k3d
+   cluster delete` + `create`), essa remoção não se propaga sozinha — teria que rodar o mesmo
+   `--port-delete` de novo, ou já criar sem a porta desde o início.
 
 **Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
 `docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
@@ -50,8 +58,8 @@ prioridade") foi aplicada de forma permanente: `dbaccess` do Compose agora publi
 host (`DBACCESS_HOST_PORT`, default `7891` em `docker-compose.yaml`), mantendo `DBACCESS_PORT`
 (7890) intacto como porta interna — nenhum appserver percebe diferença, todos falam com
 `protheus_dbaccess:7890` pela rede `protheus_network`. Commit `18bb275` no
-`docker-protheus-devops-stack`. Isso também tira urgência do item 4 do backlog deste repo (limpar
-o mapeamento inerte da 7890 no `serverlb`) — segue desejável, mas deixou de causar colisão prática.
+`docker-protheus-devops-stack`. Isso tirou a urgência do mapeamento inerte da 7890 no `serverlb`
+— e o mapeamento em si foi removido de vez em 2026-09-18 (ver "Onde paramos" no topo).
 
 Gate de bootstrap respeitado: antes de subir o `core`, banco contado isoladamente (53 tabelas
 `SYS_*` — base já populada, não era base nova) via `postgres_db` sozinho, só então `./run.sh
@@ -94,7 +102,7 @@ mas isso é só de onde foram copiados — não é o pacote TOTVS de origem, e n
 `P12_INCLUDES.ZIP` do advpl (que tem `.th` só que prefixados `fw-tlpp-*`, schema diferente).
 Origem do `tlpp` continua aberta. Detalhe completo no item 1 do backlog abaixo.
 
-**`webagent` adicionado ao backlog (item 5)** a pedido do usuário — componente novo
+**`webagent` adicionado ao backlog (item 4)** a pedido do usuário — componente novo
 (`docker-protheus-webagent` não existe ainda), artefato já baixado desde 02/07
 (`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) mas sem nenhum
 trabalho de containerização começado.
@@ -191,6 +199,20 @@ Argo CD terminar a sincronização normalmente. Nada disso afetou os outros comp
 protegeu os 3 hostPaths pelos dois ciclos de delete+recreate). Tudo documentado em detalhe no ADR
 0012 ("Obstáculos reais enfrentados") — leitura obrigatória antes de tentar o item 3 (renumerado,
 receita de cluster do zero), que vai bater no mesmo problema em escala maior.
+
+**Item 4 (antigo) do backlog fechado — porta `7890` removida do `serverlb`**: k3d tem suporte
+nativo (experimental) pra editar port mappings de um cluster já existente sem recriar
+server/agent — `k3d cluster edit protheus-cluster --port-delete 7890:7890@loadbalancer` (o
+`@loadbalancer` como nodefilter é obrigatório, senão falha com "No nodefilters specified"). Sob
+o capô, o k3d renomeia o `serverlb` antigo, cria um novo sem o mapeamento, para o antigo e apaga
+— tudo automatizado pela própria ferramenta, ~17s, zero downtime pros nodes `server-0`/`agent-0`
+(não tocados) e zero restart nos pods do namespace `protheus-devops` (confirmado depois:
+`appserver-core`/`rest`/`telnet`/`postgres`/`webapp`/`printer` seguiram com os mesmos 0 restarts
+de antes da operação). Único porto aberto no `serverlb` agora: `6443` (API do k8s). **Não é uma
+mudança persistida no git** — é estado do container Docker do k3d, fora do que `base/`/
+`scripts/k3d-nodes/` gerenciam (o próprio `scripts/k3d-nodes/README.md` já registrava que o
+`serverlb` não é recriado por aqueles scripts). Se o cluster inteiro for recriado do zero no
+futuro (item 3), essa remoção não se propaga sozinha — fica registrado pro item 3 também.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -440,12 +462,7 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    DR completo vai bater no mesmo problema de dependência circular entre o hook `PreSync`
    `smartview-db-init` e o Postgres pausado/recriado — ver "Obstáculos reais enfrentados" no
    ADR 0012 antes de planejar este item.
-4. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
-   dbaccess do cluster é via `kubectl port-forward`). Deixou de colidir na prática desde
-   2026-09-18 (parte 2): o `dbaccess` do Compose passou a publicar em `7891` no host, então os
-   dois lados nunca mais disputam a mesma porta. Sem urgência agora — segue desejável remover o
-   mapeamento morto da receita do LB quando ela for versionada, só por limpeza.
-5. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
+4. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
    fora de escopo tanto do Compose quanto deste cluster até hoje — é o componente que faltaria
    pra expor o SmartClient via navegador (HTML5) sem instalação local, hoje só validado via
    SmartClient desktop nativo (`CORE_PORT_MULTI`). Artefato já baixado
