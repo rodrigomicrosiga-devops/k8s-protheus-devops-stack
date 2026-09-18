@@ -147,6 +147,20 @@ insistir num `compile` 100% verde agora — a parte que importava (entrega dos i
 provada; um `compile` limpo fica pro próximo fonte real sem colisão de nome. Detalhe completo em
 `docs/adr/0010-includes-seed-efemero-initcontainer.md` (status atualizado).
 
+**Item 2 do backlog fechado (cofre local pro `postgres-secret.env`)**: avaliado o risco real
+antes de agir (cluster local, single-dev, senha já documentada como default no `CLAUDE.md`) —
+usuário escolheu criptografia em repouso, não rotação nem aceitar-e-documentar sem mudança.
+`base/postgres-secret.env` (plaintext, sem backup até então) criptografado com GPG simétrico
+AES256, round-trip verificado por hash (nunca exibindo o conteúdo), plaintext removido do disco
+depois. `base/postgres-secret.env.gpg` é o novo backup versionado; `scripts/secrets/`
+(`encrypt.sh`/`decrypt.sh`, genéricos) documentam o fluxo — os dois pedem a passphrase
+interativamente, nunca por argumento/env, então não são algo que uma sessão automatizada roda
+sozinha. Passphrase gerada (`openssl rand -base64 32`) e entregue uma única vez ao usuário nesta
+sessão — não fica retida em lugar nenhum além do gerenciador de senhas dele. Confirmado que os
+outros 3 segredos selados (`smartview`, `appserver-upddistr`, `regcred`) não têm cópia plaintext
+no disco — só o Postgres tinha esse problema. Detalhe completo em
+`docs/adr/0011-cofre-local-gpg-secrets-plaintext.md`.
+
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
 Retomada do handoff de 17/09. Item 0 do backlog (atualização de binários TOTVS) fechado no lado
@@ -376,9 +390,15 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
      foram copiados, não a origem TOTVS. Não é o mesmo pacote do `advpl` (que tem `.th` também,
      só que prefixados `fw-tlpp-*`, schema diferente). Busca por zip/pacote com "TLPP"/"SDK" no
      nome em `~/Downloads`, `documentos/` e nas extensões do VS Code (TDS) não achou nada.
-2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
-   pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
-   vale avaliar rotação/cofre local).
+2. **Segurança — fechado em 2026-09-18**: `base/postgres-secret.env` (plaintext do
+   `postgres-secret` selado) passou a ter backup cifrado com GPG simétrico
+   (`base/postgres-secret.env.gpg`, versionado) em vez de existir só como arquivo puro sem
+   backup no disco. `scripts/secrets/encrypt.sh`/`decrypt.sh` (genéricos, reusáveis pra outros
+   segredos), passphrase gerada e entregue só ao usuário (guardada no gerenciador de senhas
+   dele, nunca no repositório). Rotação de senha descartada como escopo deste item — mudaria
+   Compose e k8s juntos (mesma senha nos dois, por decisão deliberada), reabrindo a
+   padronização de 16/09 sem motivo novo. Detalhe completo em
+   `docs/adr/0011-cofre-local-gpg-secrets-plaintext.md`.
 3. **DR incompleto**: 3 PVs (`postgres-pv`, `webapp-shared-pv`, `printer-shared-pv`) têm
    `nodeAffinity` aplicada fora do git (campo imutável em PV já existente) — um cluster
    recriado do zero a partir deste repo perde essa afinidade. Ver

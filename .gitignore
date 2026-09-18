@@ -1,2 +1,5 @@
-# Segredo real: nunca vai puro pro git (usar SealedSecret, ver base/postgres-secret.sealed.yaml)
+# Segredo real: nunca vai puro pro git (usar SealedSecret, ver base/postgres-secret.sealed.yaml).
+# A cópia em texto puro só existe efemeramente no disco quando decriptada via
+# scripts/secrets/decrypt.sh -- o backup de verdade é base/postgres-secret.env.gpg (versionado,
+# ver docs/adr/0011-cofre-local-gpg-secrets-plaintext.md).
 base/postgres-secret.env
