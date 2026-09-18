@@ -4,30 +4,65 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-18)
+## Onde paramos (fim da sessão de 2026-09-18, parte 2)
 
-**Verificar ao retomar amanhã, antes de qualquer coisa nova** (os 4 passos desta sessão foram
-aplicados e validados ao vivo antes do encerramento, mas dependem de estado externo — máquina
-pode ter sido reiniciada, cluster pode ter driftado):
+**Verificar ao retomar, antes de qualquer coisa nova**:
 
 1. **Boot ficou higiênico?** `docker ps -a` não deve mostrar os 6 containers do Compose
    (`protheus_core`/`postgres`/`license`/`webapp`/`printer`/`dbaccess`) rodando sozinhos — eles
    devem estar `Exited`, não `Up`, a menos que o usuário os suba deliberadamente. Se algum
-   estiver `Up` sem ter sido pedido, a policy `unless-stopped` pode não ter pego (checar
-   `docker inspect <nome> --format '{{.HostConfig.RestartPolicy.Name}}'`).
+   estiver `Up` sem ter sido pedido, ver a regra operacional nova abaixo sobre `docker stop` em
+   container já parado por falha — não é mais a policy `unless-stopped` em si (já confirmada
+   correta nos 6).
 2. **Bump do k8s se sustentou?** `kubectl get applications -n argocd protheus-devops-stack` deve
    seguir `Synced`/`Healthy`; `kubectl get pods -n protheus-devops -o
    custom-columns='POD:.metadata.name,IMAGE:.spec.containers[*].image'` deve mostrar
    `appserver-dev:24.3.1.9` (core/rest/telnet) e `license-dev:3.7.2` — não voltou pra
    24.3.1.5/3.7.1. Se tiver voltado, o Image Updater pode ter re-resolvido pra outra coisa;
    investigar antes de mexer em qualquer manifesto.
-3. **Pendência do Compose segue em aberto** (não é bug, é trabalho não feito ainda): containers
-   locais continuam nas imagens antigas (24.3.1.5/3.7.1) mesmo com o `docker-compose.yaml` já
-   apontando pra 24.3.1.9/3.7.2 desde o commit `2cfd5d8`. Só relevante quando o usuário quiser
-   validar o Compose ao vivo — rodar `docs/prompts/atualizar-tags-compose.md` (passos 8–9) então.
+3. **Item 0 do backlog fechado nesta sessão** — Compose validado ao vivo nas tags novas, ver
+   abaixo. Nada pendente aqui.
 4. **Decisão do `includes.zip` segue pendente do usuário** — pergunta em aberto no backlog (item
    1): vale criar `docker-protheus-includes` como seed image? Não perguntar de novo sem o usuário
    trazer o assunto — já está registrado, é decisão dele, não follow-up automático.
+
+**Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
+`docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
+corrigido o desvio da checklist herdado da sessão anterior: o `protheus_dbaccess` tinha voltado
+sozinho no boot desta manhã, degradado (sem rede anexada, loop de `nc` sem resolver
+`protheus_postgres`) — causa raiz real documentada na regra operacional nova abaixo, não era a
+policy `unless-stopped`. `docker stop protheus_dbaccess` (com ele rodando) resolveu.
+
+Como o próximo passo ia subir a stack Compose de propósito, e ela disputa a porta `7890` do host
+com o `serverlb` do k3d (mesma colisão do boot de 17/09), a decisão do usuário ("cluster é
+prioridade") foi aplicada de forma permanente: `dbaccess` do Compose agora publica em `7891` no
+host (`DBACCESS_HOST_PORT`, default `7891` em `docker-compose.yaml`), mantendo `DBACCESS_PORT`
+(7890) intacto como porta interna — nenhum appserver percebe diferença, todos falam com
+`protheus_dbaccess:7890` pela rede `protheus_network`. Commit `18bb275` no
+`docker-protheus-devops-stack`. Isso também tira urgência do item 6 do backlog deste repo (limpar
+o mapeamento inerte da 7890 no `serverlb`) — segue desejável, mas deixou de causar colisão prática.
+
+Gate de bootstrap respeitado: antes de subir o `core`, banco contado isoladamente (53 tabelas
+`SYS_*` — base já populada, não era base nova) via `postgres_db` sozinho, só então `./run.sh
+postgres`. Validado ao vivo: os 6 containers subiram limpos nas tags novas (confirmado via
+`docker ps` — `appserver-dev:24.3.1.9`, `license-dev:3.7.2`), `protheus_dbaccess` e
+`protheus_license` `healthy`, `protheus_core` log interno
+(`/totvs/protheus/log/appserver_core.log`) confirmou `Totvs Application Server is running` em
+13.36s sem erro fatal e sem pedido de bootstrap (o único warning, `OPEN EMPTY RPO`, é esperado —
+`custom.rpo` do Compose começa vazio até um compile local, ambiente separado do cluster). Cluster
+k3d conferido depois, sem impacto: `Synced`/`Healthy`, sem restarts novos. Stack local parada de
+volta (`docker compose stop`, todos os 6, incluindo `postgres_db` que tinha sido subido à parte)
+ao encerrar a validação — não fica no ar.
+
+**Achado sobre o log do appserver**: `appserver_core.log` (e provavelmente os outros do
+AppServer) é um arquivo pré-alocado — o conteúdo real fica intercalado com bytes nulos de
+padding, não é texto puro sequencial. `tail`/`grep` direto no arquivo retorna majoritariamente
+padding (`\0`) e pode estourar limite de output em ferramentas que capturam texto. Ler com
+`tr -d '\000' < arquivo | tail -c N` (descarta os nulos antes de cortar) — `docker logs` do
+container não serve aqui, o entrypoint não propaga o log do `appsrvlinux` pro stdout do
+container além do banner inicial.
+
+## Histórico condensado da sessão de 2026-09-18, parte 1
 
 Retomada do handoff de 17/09. Item 0 do backlog (atualização de binários TOTVS) fechado no lado
 k8s — era o que faltava de fato; os passos 1 (repos irmãos) e 2 (Compose) já tinham sido
@@ -43,8 +78,17 @@ failed: port is already allocated`); o `protheus_core` ficou desde então girand
 `nc` esperando o dbaccess, sem nunca subir o `appsrvlinux` (não chegou a haver risco de
 bootstrap). Decisão do usuário: **no boot, o cluster é a prioridade** — a stack Compose não deve
 subir sozinha. Fix aplicado: `docker update --restart unless-stopped` nos 6 containers vivos (sem
-recriar) + `docker stop` neles. Não mexido: a receita do `serverlb` (mapeamento da `7890`
-continua lá, inerte — ver backlog).
+recriar) + `docker stop` neles.
+
+**Correção registrada em 2026-09-18 (parte 2)**: o fix acima não foi suficiente — no boot
+seguinte (mesmo dia, de manhã) o `protheus_dbaccess` voltou sozinho de novo, apesar de
+`unless-stopped` confirmado gravado nele. Causa raiz real, diferente do que se supôs aqui: o
+`docker stop` da sessão anterior foi um no-op nele, porque ele **já estava parado por falha**
+(a colisão de porta descrita acima) — `unless-stopped` só pula um container que foi **parado
+manualmente**, e um container que morre por falha não conta como isso. Ver regra operacional
+nova abaixo. A colisão de porta em si foi resolvida de vez na mesma sessão (não mais "inerte,
+ver backlog"): `dbaccess` do Compose passou a publicar em `7891` no host — ver item 0 do backlog
+fechado, seção "Onde paramos" no topo.
 
 **Binários TOTVS — item 0 fechado no k8s**: confirmado que a `Application` usa `writeBackConfig:
 argocd` — o Image Updater grava o digest resolvido como override em
@@ -227,11 +271,6 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
 
 ## Backlog aberto, por prioridade
 
-0. **Validação ao vivo do Compose nas tags novas** (rebaixado de "Atualização de binários TOTVS"
-   — o essencial, k8s, foi fechado em 2026-09-18): `appserver-dev`/`appserver-dev-worker`
-   24.3.1.9 e `license-dev` 3.7.2 já estão no `docker-compose.yaml` (commit `2cfd5d8`), mas a
-   stack local nunca foi recriada com elas. Rodar `docs/prompts/atualizar-tags-compose.md`
-   (passos 8–9) quando fizer sentido — não bloqueia nada no cluster.
 1. **`docker-protheus-includes` (seed image) — decisão pendente do usuário**: origem do
    `includes.zip` confirmada em 2026-09-18 (pacote `P12_INCLUDES.ZIP` do portal TOTVS pro
    `advpl`; `tlpp` ainda sem origem identificada). Falta decidir se vale criar o repo seguindo o
@@ -256,10 +295,10 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    `base/appserver.yaml` (removido, substituído por core/rest/telnet). Também não menciona
    `scripts/k3d-nodes/` nem `scripts/appserver-patch/` nem `docs/prompts/` ainda.
 6. **Mapeamento inerte da porta `7890` no `serverlb`** (k3d) — não usado por nada (acesso real ao
-   dbaccess do cluster é via `kubectl port-forward`), mas segue colidindo com a porta do
-   `dbaccess` do Compose sempre que ambos tentam subir no boot. Resolvido operacionalmente em
-   2026-09-18 (cluster tem prioridade, Compose não sobe sozinho) — remover da receita do LB
-   quando ela for versionada.
+   dbaccess do cluster é via `kubectl port-forward`). Deixou de colidir na prática desde
+   2026-09-18 (parte 2): o `dbaccess` do Compose passou a publicar em `7891` no host, então os
+   dois lados nunca mais disputam a mesma porta. Sem urgência agora — segue desejável remover o
+   mapeamento morto da receita do LB quando ela for versionada, só por limpeza.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
@@ -319,6 +358,20 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
   remove `syncPolicy.automated` de uma Application ("Modify Shared Resources"). Nada disso é
   contornável nem deveria ser — o caminho é sempre preparar o comando exato e pedir pro usuário
   rodar via `!`.
+- **`docker stop` só grava a flag de parada manual (que faz `unless-stopped` respeitar) se o
+  container estiver `Up` no momento** — num container já parado por falha, é no-op silencioso: a
+  policy segue correta no `docker inspect`, mas ele volta sozinho no próximo boot do daemon
+  mesmo assim. Achado real em 2026-09-18 (parte 2): o `protheus_dbaccess` tinha morrido por uma
+  colisão de porta (17/09) antes do `docker stop` da sessão de 17/09 rodar nele — o stop não teve
+  efeito porque ele já estava `Exited`, e ele voltou sozinho no boot seguinte. Fix: `docker stop`
+  precisa rodar com o container **rodando** para valer; se ele já está parado, não há nada a
+  fazer (já está no estado desejado, só a flag interna é que não foi gravada).
+- **Log do AppServer (`appserver_core.log` etc.) é pré-alocado com padding de bytes nulos** — o
+  conteúdo real fica intercalado com `\0`, não é texto sequencial puro. `tail`/`grep` direto no
+  arquivo retorna majoritariamente padding e pode estourar limites de captura de output. Ler com
+  `tr -d '\000' < arquivo | tail -c N` (descarta os nulos antes de cortar pelo fim). `docker logs`
+  do container não ajuda aqui — o entrypoint não propaga a saída do `appsrvlinux` pro stdout do
+  container além do banner inicial (OS/memory/container info); o log real está sempre no arquivo.
 
 ## Convenção de nomenclatura (fechada em 2026-09-16)
 
