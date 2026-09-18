@@ -1,9 +1,8 @@
 # Sidecar de entrega: não expõe porta nenhuma, só extrai o binário do WebApp
 # (versão independente, atualizável sem tocar no AppServer) para um volume
-# compartilhado. Quando base/appserver.yaml for finalizado, ele deve montar
-# este mesmo PVC (webapp-shared-pvc) como somente-leitura, ex.: em
-# /totvs/appserver/webapp — espelhando o /tmp/webapp_shared:ro do
-# docker-compose original.
+# compartilhado. Montado somente-leitura por appserver-core/-rest/-telnet em
+# /tmp/webapp_shared -- espelha o /tmp/webapp_shared:ro do docker-compose
+# original.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -17,10 +16,16 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   hostPath:
     path: /media/rodrigo/dados/k8s-volume/webapp-shared
-  # NOTA: mesmo tratamento do postgres-pv (ver comentário lá) -- este PV já
-  # roda com nodeAffinity fixando-o no agent-0, aplicada uma única vez fora
-  # do fluxo do Argo CD, porque o campo é imutável em PVs já existentes e
-  # declará-lo aqui deixaria o recurso permanentemente com falha de sync.
+  # nodeAffinity declarada desde o nascimento do PV (recriado do zero em
+  # 2026-09-18 especificamente pra isso -- ver ADR 0004 e ADR 0012).
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
