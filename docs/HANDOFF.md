@@ -73,6 +73,21 @@ seção de GitOps atualizada com a lista real de imagens rastreadas pelo Image U
 `docs/HANDOFF.md`, `docs/adr/`, `scripts/k3d-nodes/`, `scripts/appserver-patch/` e
 `docs/prompts/` — nenhum tinha menção no README antes. Commit `fded313`.
 
+**Item 1 do backlog aprofundado (nomes exatos dos zips de `includes`)**: busca no disco (não só
+no handoff) achou o zip real da revisão nova do `advpl` já baixado
+(`~/Downloads/26-08-07-P12_INCLUDES.ZIP`, 157 arquivos) — a revisão em uso não existe mais sob o
+nome original, só extraída. Pro `tlpp`, achado novo que não fecha a questão mas avança: os 6
+`tlpp-*.th` em uso são idênticos byte-a-byte aos de
+`/media/rodrigo/dados/totvs/protheus/2410/includes/` (instalação local antiga do Protheus 24.10),
+mas isso é só de onde foram copiados — não é o pacote TOTVS de origem, e não é o mesmo
+`P12_INCLUDES.ZIP` do advpl (que tem `.th` só que prefixados `fw-tlpp-*`, schema diferente).
+Origem do `tlpp` continua aberta. Detalhe completo no item 1 do backlog abaixo.
+
+**`webagent` adicionado ao backlog (item 6)** a pedido do usuário — componente novo
+(`docker-protheus-webagent` não existe ainda), artefato já baixado desde 02/07
+(`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) mas sem nenhum
+trabalho de containerização começado.
+
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
 Retomada do handoff de 17/09. Item 0 do backlog (atualização de binários TOTVS) fechado no lado
@@ -282,11 +297,20 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
 
 ## Backlog aberto, por prioridade
 
-1. **`docker-protheus-includes` (seed image) — decisão pendente do usuário**: origem do
-   `includes.zip` confirmada em 2026-09-18 (pacote `P12_INCLUDES.ZIP` do portal TOTVS pro
-   `advpl`; `tlpp` ainda sem origem identificada). Falta decidir se vale criar o repo seguindo o
-   padrão rpo/system/systemload — e, se sim, aplicar a revisão mais nova já disponível do
-   `advpl` (157 arquivos vs. 155 em uso).
+1. **`docker-protheus-includes` (seed image) — decisão pendente do usuário**: nomes exatos
+   levantados em 2026-09-18. `advpl`: pacote `P12_INCLUDES.ZIP` do portal TOTVS — a revisão em
+   uso hoje (155 arquivos, timestamp interno `2026-06-26`) não existe mais em disco sob o nome
+   original (extraída, zip descartado); a revisão mais nova já está baixada em
+   `~/Downloads/26-08-07-P12_INCLUDES.ZIP` (157 arquivos). `tlpp`: origem do pacote TOTVS
+   **continua não identificada** — os 6 `tlpp-*.th` em uso são idênticos byte-a-byte aos de
+   `/media/rodrigo/dados/totvs/protheus/2410/includes/` (instalação local antiga do Protheus
+   24.10, não um zip baixável), mas isso é só de onde foram copiados, não a origem TOTVS. Não é
+   o mesmo pacote do `advpl`: o `P12_INCLUDES.ZIP` mais novo já baixado tem `.th` também, só que
+   prefixados `fw-tlpp-*` (schema diferente, não bate com os `tlpp-*.th` em uso). Busca por
+   zip/pacote com "TLPP"/"SDK" no nome em `~/Downloads`, `documentos/` e nas extensões do VS
+   Code (TDS) não achou nada. Falta decidir se vale criar o repo seguindo o padrão
+   rpo/system/systemload — a revisão nova do `advpl` já está pronta pra uso; a do `tlpp` segue
+   bloqueada até a origem aparecer.
 2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).
@@ -306,6 +330,17 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    2026-09-18 (parte 2): o `dbaccess` do Compose passou a publicar em `7891` no host, então os
    dois lados nunca mais disputam a mesma porta. Sem urgência agora — segue desejável remover o
    mapeamento morto da receita do LB quando ela for versionada, só por limpeza.
+6. **`webagent` (SmartClient Web-Agent) — componente novo, sem repo `docker-protheus-webagent`**:
+   fora de escopo tanto do Compose quanto deste cluster até hoje — é o componente que faltaria
+   pra expor o SmartClient via navegador (HTML5) sem instalação local, hoje só validado via
+   SmartClient desktop nativo (`CORE_PORT_MULTI`). Artefato já baixado
+   (`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) desde 02/07, sem
+   nenhum trabalho de containerização começado — diferente dos outros itens do backlog, este não
+   é atualização de um repo existente: precisa de `docker-protheus-webagent` do zero
+   (Dockerfile/entrypoint novos, decisão de porta/exposição, CI própria, mesmo padrão dos outros
+   ~13 repos `docker-protheus-*`), só depois integração no `docker-compose.yaml` e em
+   `base/`/`argocd/image-updater.yaml` deste repo. Não bloqueia nada hoje. Prioridade e decisão
+   de fazer ficam com o usuário.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
