@@ -11,6 +11,11 @@
 # worker, que sai 0 quando a fila está vazia) -- não usar como smoke test
 # sem fonte real depositado.
 #
+# `protheus-includes` é `emptyDir`, populado a cada execução pelo
+# initContainer `seed-includes` (imagem rodrigomicrosiga/protheus-includes-dev,
+# repo docker-protheus-includes) -- não é PVC/hostPath. Ver ADR 0010 pro
+# porquê deste seed ser efêmero, diferente de rpo/system/systemload.
+#
 # Uso: sempre via scripts/appserver-patch/run-job.sh compile (nunca
 # `kubectl apply` direto -- o script para core/rest/telnet antes e religa
 # depois).
@@ -54,6 +59,21 @@ spec:
               name: protheus-apo
             - mountPath: /totvs/protheus/patches_queue
               name: protheus-patches
+            - mountPath: /totvs/protheus/includes
+              name: protheus-includes
+        # Entrega os dois includes.zip (advpl/tlpp) no emptyDir -- roda depois
+        # do prepare-volumes (que já criou os subdiretórios e liberou
+        # permissão 0777, necessário porque esta imagem roda como usuário
+        # não-root `protheus`). Sem marcador de idempotência de propósito
+        # (ver ADR 0010): conteúdo estático, sempre a revisão que a imagem
+        # carrega, sem risco de sobrescrever nada -- o emptyDir nasce vazio
+        # a cada execução do Job.
+        - name: seed-includes
+          image: rodrigomicrosiga/protheus-includes-dev:0.0.1
+          env:
+            - name: TARGET_DIR
+              value: /totvs/protheus/includes
+          volumeMounts:
             - mountPath: /totvs/protheus/includes
               name: protheus-includes
       containers:
@@ -111,6 +131,7 @@ spec:
         - name: protheus-patches
           persistentVolumeClaim:
             claimName: protheus-patches-pvc
+        # emptyDir, não PVC -- ver ADR 0010. Populado a cada execução pelo
+        # initContainer seed-includes, nunca persiste entre Jobs.
         - name: protheus-includes
-          persistentVolumeClaim:
-            claimName: protheus-includes-pvc
+          emptyDir: {}

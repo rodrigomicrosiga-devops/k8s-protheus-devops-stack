@@ -22,9 +22,14 @@
    investigar antes de mexer em qualquer manifesto.
 3. **Itens 0 e 5 do backlog fechados nesta sessão** — Compose validado ao vivo nas tags novas e
    `README.md` atualizado (Fases C/D/E, scripts, prompts), ver abaixo. Nada pendente aqui.
-4. **Decisão do `includes.zip` segue pendente do usuário** — pergunta em aberto no backlog (item
-   1): vale criar `docker-protheus-includes` como seed image? Não perguntar de novo sem o usuário
-   trazer o assunto — já está registrado, é decisão dele, não follow-up automático.
+4. **Item 1 do backlog (`includes.zip`) implementado, ainda NÃO validado ao vivo** — repo
+   `docker-protheus-includes` criado e publicado, `appserver-compile-job.yaml` alterado (ADR
+   0010, ver abaixo). Falta: (a) configurar `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` no repo novo
+   no GitHub (o CI ainda não rodou — sem esses secrets, falha no login do Docker Hub); (b)
+   depois do CI publicar `rodrigomicrosiga/protheus-includes-dev:0.0.1`, rodar
+   `scripts/appserver-patch/run-job.sh compile` com fonte real pra confirmar que o
+   `initContainer seed-includes` entrega os zips certos pro `code_compiler.sh`. Não dar como
+   fechado antes dessa validação.
 
 **Item 0 do backlog fechado** (validação ao vivo do Compose nas tags novas — passos 8–9 de
 `docs/prompts/atualizar-tags-compose.md`, no repo `docker-protheus-devops-stack`). Antes disso,
@@ -87,6 +92,37 @@ Origem do `tlpp` continua aberta. Detalhe completo no item 1 do backlog abaixo.
 (`docker-protheus-webagent` não existe ainda), artefato já baixado desde 02/07
 (`~/Downloads/26-07-02-P12_SMARTCLIENT_WEB-AGENT_1.1.1_LINUX_X64.TAR.GZ`) mas sem nenhum
 trabalho de containerização começado.
+
+**Item 1 do backlog implementado (`docker-protheus-includes`)**: decisão tomada com o usuário —
+seed **efêmero**, não Deployment em standby como rpo/system/systemload. Achado que motivou o
+desenho: `code_compiler.sh` (dentro do `appserver-dev-worker`) já re-extrai os dois
+`includes.zip` do zero a cada `compile`, então o volume nunca precisou ser persistente — só
+entregar os dois `.zip` no lugar certo, uma vez por execução do Job. Detalhe completo e
+alternativas descartadas em `docs/adr/0010-includes-seed-efemero-initcontainer.md`.
+
+Implementado: repo `docker-protheus-includes` criado do zero
+(Dockerfile/entrypoint/CI/.gitignore, seguindo o padrão dos outros seeds) e publicado —
+`github.com/rodrigomicrosiga-devops/docker-protheus-includes` (privado, branch `develop`,
+commit `1d4b8d0`). Versionamento **próprio** (semver `0.0.1`), não a
+release do Protheus — o `P12_INCLUDES.ZIP` é publicado à parte no portal TOTVS, sem relação com o
+calendário de release (a revisão em uso é de 26/06 e já existe uma mais nova de 07/08, sem a
+release `12.1.2510` ter mudado). Zips não versionados no repo (`.gitignore`), CI resgata do disco
+do runner self-hosted a partir de `docker-protheus-devops-stack/protheus/includes/`.
+
+No cluster: `appserver-compile-job.yaml` ganhou um `initContainer` novo (`seed-includes`, roda
+depois do `prepare-volumes` já existente) que copia os dois zips pra dentro do volume
+`protheus-includes` — que deixou de ser PVC/PV com hostPath e virou `emptyDir`.
+`protheus-includes-pv`/`-pvc` removidos de `base/protheus-patch-storage.yaml` (diretório antigo
+no host, `/media/rodrigo/dados/k8s-volume/protheus-includes/`, fica órfão, não foi limpo). Sem
+marcador de idempotência (não se aplica — conteúdo estático) e sem rastreamento pelo Image
+Updater (mesma razão do `appserver-dev-worker`: a `compile-job` fica fora do Kustomize, tag
+bumpada manualmente). `scripts/appserver-patch/README.md` atualizado — o passo de depósito
+manual dos includes não existe mais.
+
+**Validado apenas client-side** (`kubectl kustomize base/` e `kubectl apply --dry-run=client -f`
+nos dois manifestos editados, sem erro) — **NÃO validado com um `compile` real ainda**. Faltam
+dois passos antes de considerar fechado: configurar os secrets do Docker Hub no repo novo (CI
+nunca rodou) e rodar `run-job.sh compile` de ponta a ponta. Ver checklist no topo.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 1
 
@@ -297,20 +333,26 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
 
 ## Backlog aberto, por prioridade
 
-1. **`docker-protheus-includes` (seed image) — decisão pendente do usuário**: nomes exatos
-   levantados em 2026-09-18. `advpl`: pacote `P12_INCLUDES.ZIP` do portal TOTVS — a revisão em
-   uso hoje (155 arquivos, timestamp interno `2026-06-26`) não existe mais em disco sob o nome
-   original (extraída, zip descartado); a revisão mais nova já está baixada em
-   `~/Downloads/26-08-07-P12_INCLUDES.ZIP` (157 arquivos). `tlpp`: origem do pacote TOTVS
-   **continua não identificada** — os 6 `tlpp-*.th` em uso são idênticos byte-a-byte aos de
-   `/media/rodrigo/dados/totvs/protheus/2410/includes/` (instalação local antiga do Protheus
-   24.10, não um zip baixável), mas isso é só de onde foram copiados, não a origem TOTVS. Não é
-   o mesmo pacote do `advpl`: o `P12_INCLUDES.ZIP` mais novo já baixado tem `.th` também, só que
-   prefixados `fw-tlpp-*` (schema diferente, não bate com os `tlpp-*.th` em uso). Busca por
-   zip/pacote com "TLPP"/"SDK" no nome em `~/Downloads`, `documentos/` e nas extensões do VS
-   Code (TDS) não achou nada. Falta decidir se vale criar o repo seguindo o padrão
-   rpo/system/systemload — a revisão nova do `advpl` já está pronta pra uso; a do `tlpp` segue
-   bloqueada até a origem aparecer.
+1. **`docker-protheus-includes` — implementado em 2026-09-18, falta validar ao vivo**: repo
+   criado (`github.com/rodrigomicrosiga-devops/docker-protheus-includes`, privado) e cluster
+   alterado (`appserver-compile-job.yaml`), ver "Onde paramos" no topo e ADR 0010 pro desenho
+   (seed efêmero via `initContainer` + `emptyDir`, não Deployment em standby). Pendências:
+   - **Bloqueante pro CI**: configurar `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` como secrets do
+     repo novo no GitHub — sem isso o workflow falha no login do Docker Hub, a imagem
+     `rodrigomicrosiga/protheus-includes-dev:0.0.1` nunca é publicada. Ação do usuário (secrets
+     não são algo que se configura por CLI sem expor credencial).
+   - **Validação ao vivo pendente**: depois do CI publicar, rodar
+     `scripts/appserver-patch/run-job.sh compile` com fonte real e confirmar que o
+     `code_compiler.sh` acha os dois `includes.zip` entregues pelo `initContainer`.
+   - **`advpl`**: revisão nova já identificada e baixada (`~/Downloads/26-08-07-P12_INCLUDES.ZIP`,
+     157 arquivos vs. 155 em uso) — decisão de aplicar ou não fica pro usuário, procedimento
+     documentado no README do repo novo.
+   - **`tlpp`**: origem do pacote TOTVS **continua não identificada** — os 6 `tlpp-*.th` em uso
+     são idênticos byte-a-byte aos de `/media/rodrigo/dados/totvs/protheus/2410/includes/`
+     (instalação local antiga do Protheus 24.10, não um zip baixável), mas isso é só de onde
+     foram copiados, não a origem TOTVS. Não é o mesmo pacote do `advpl` (que tem `.th` também,
+     só que prefixados `fw-tlpp-*`, schema diferente). Busca por zip/pacote com "TLPP"/"SDK" no
+     nome em `~/Downloads`, `documentos/` e nas extensões do VS Code (TDS) não achou nada.
 2. **Segurança**: `base/postgres-secret.env` tem a senha real em texto plano no disco (coberto
    pelo `.gitignore`, nunca commitado, mas é o plaintext exato do `postgres-secret` selado —
    vale avaliar rotação/cofre local).

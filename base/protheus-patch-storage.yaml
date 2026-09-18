@@ -44,39 +44,11 @@ spec:
     requests:
       storage: 2Gi
   volumeName: protheus-patches-pv
----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: protheus-includes-pv
-spec:
-  storageClassName: local-path
-  capacity:
-    storage: 1Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Retain
-  hostPath:
-    path: /media/rodrigo/dados/k8s-volume/protheus-includes
-  nodeAffinity:
-    required:
-      nodeSelectorTerms:
-        - matchExpressions:
-            - key: kubernetes.io/hostname
-              operator: In
-              values:
-                - k3d-protheus-cluster-agent-0
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: protheus-includes-pvc
-  namespace: protheus-devops
-spec:
-  storageClassName: local-path
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 1Gi
-  volumeName: protheus-includes-pv
+# protheus-includes-pv/pvc removidos em 2026-09-18 (ADR 0010): o includes.zip
+# (ADVPL/TLPP) deixou de precisar de PV/PVC com hostPath -- agora é entregue
+# via initContainer efêmero (rodrigomicrosiga/protheus-includes-dev, repo
+# docker-protheus-includes) num emptyDir, direto em
+# base/appserver-compile-job.yaml. Conteúdo estático (não acumula estado
+# como o RPO), sem consumidor contínuo (só o compile Job) -- persistência
+# nunca foi necessária. Diretório antigo (/media/rodrigo/dados/k8s-volume/
+# protheus-includes/ no agent-0) fica órfão, não é limpo automaticamente.

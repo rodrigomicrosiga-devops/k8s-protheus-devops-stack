@@ -36,10 +36,10 @@ O texto original do backlog (`docs/HANDOFF.md`) cogitava "hooks Argo CD PreSync/
   cp arquivo.ptm /media/rodrigo/dados/k8s-volume/protheus-patches/
   ```
 - **compile** — fonte (`.prw`/`.tlpp`) em `protheus-patches/`. Os `includes.zip` (advpl/tlpp)
-  já foram depositados em `/media/rodrigo/dados/k8s-volume/protheus-includes/{advpl,tlpp}/` em
-  2026-09-17 (cópia dos mesmos arquivos usados pelo Compose,
-  `docker-protheus-devops-stack/protheus/includes/`) — não precisa repetir a menos que a TOTVS
-  libere includes novos.
+  **não precisam mais de depósito manual** desde 2026-09-18 (ADR 0010): um `initContainer`
+  (`seed-includes`, imagem `rodrigomicrosiga/protheus-includes-dev`, repo
+  `docker-protheus-includes`) entrega os dois zips num `emptyDir` a cada execução do Job. O PV
+  hostPath antigo (`protheus-includes-pv`/`-pvc`) foi removido.
 - **upddistr** — arquivos de atualização (SX*, *.mzp, sdf*) na **raiz** de
   `/media/rodrigo/dados/k8s-volume/protheus-systemload/`, **sem subdiretórios**. Se o insumo vier
   de um pacote TOTVS (`.zip` de "atualização contínua"), confira o `manifest.json` dele — o
