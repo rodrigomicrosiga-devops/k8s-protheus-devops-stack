@@ -21,7 +21,7 @@ graph TD
         end
 
         subgraph LIC_LAYER["Camada de Licenciamento"]
-            LIC_SVC["Service: license-service <br> NodePort: 30555 / 30820"] --> LIC_POD["Pod: License Server <br> v3.7.1 (privileged)"]
+            LIC_SVC["Service: license-service <br> NodePort: 30555 / 30820"] --> LIC_POD["Pod: License Server <br> v3.7.2 (privileged)"]
         end
 
         subgraph PG_LAYER["Camada de Persistência"]
@@ -32,6 +32,31 @@ graph TD
         subgraph DELIVERY_LAYER["Camada de Entrega (Sidecars sem Service)"]
             WEBAPP_POD["Pod: WebApp <br> v10.2.1"] --> WEBAPP_PVC["PVC: webapp-shared-pvc"]
             PRINTER_POD["Pod: Printer <br> v3.0.5"] --> PRINTER_PVC["PVC: printer-shared-pvc"]
+        end
+
+        subgraph SEED_LAYER["Camada de Seeds (Fase C -- artefatos proprietários)"]
+            RPO_SEED["Deployment: protheus-rpo-seed <br> RPO (571MB, standby)"] --> APO_PVC["PVC: protheus-apo-pvc"]
+            SYS_SEED["Deployment: protheus-system-seed <br> menus/fiscal (standby)"] --> SYS_PVC["PVC: protheus-system-pvc"]
+            SL_SEED["Deployment: protheus-systemload-seed <br> dicionário base (standby)"] --> SL_PVC["PVC: protheus-systemload-pvc"]
+        end
+
+        subgraph APPSRV_LAYER["Camada de AppServer (Fases D/E)"]
+            CORE_POD["Pod: AppServer Core <br> v24.3.1.9 (Recreate)"]
+            REST_POD["Pod: AppServer REST <br> v24.3.1.9"]
+            TELNET_POD["Pod: AppServer Telnet <br> v24.3.1.9"]
+            PATCH_JOBS["Jobs sob demanda (fora do Kustomize): <br> worker / compile / upddistr"]
+            CORE_POD -- lê --> APO_PVC
+            CORE_POD -- lê --> SYS_PVC
+            CORE_POD -- lê --> SL_PVC
+            CORE_POD -. monta ro .-> WEBAPP_PVC
+            CORE_POD -. monta ro .-> PRINTER_PVC
+            CORE_POD -- TCP --> DBA_SVC
+            REST_POD -- lê --> APO_PVC
+            REST_POD -- TCP --> DBA_SVC
+            TELNET_POD -- lê --> APO_PVC
+            TELNET_POD -- TCP --> DBA_SVC
+            PATCH_JOBS -- escreve (core pausado) --> APO_PVC
+            PATCH_JOBS -- TCP --> DBA_SVC
         end
 
         subgraph SV_LAYER["Camada de Relatórios"]
@@ -99,9 +124,34 @@ kubectl exec deployment/webapp -n protheus-devops -- ls /mnt/webapp_shared
 kubectl exec deployment/printer -n protheus-devops -- ls /mnt/printer_shared
 ```
 
-Esses dois PVCs ainda não têm consumidor: `base/appserver.yaml` (ainda incompleto/WIP, fora do escopo de automação atual) precisará montá-los como somente-leitura quando for finalizado, do mesmo jeito que o `docker-compose` original montava `webapp_shared_module` e `protheus_printer_volume` em `/tmp/webapp_shared:ro` e `/tmp/printer_shared:ro` dentro do `appserver_core`.
+Esses dois PVCs já têm consumidor: `base/appserver-core.yaml` monta os dois como somente-leitura em `/tmp/webapp_shared` e `/tmp/printer_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module` e `protheus_printer_volume` dentro do `appserver_core`. (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais — ver item 6 abaixo.)
 
-6. Validar o TOTVS SmartView
+6. AppServer (`core`/`rest`/`telnet`) e os seeds do RPO/system/systemload
+
+Antes do AppServer, os três seeds (`protheus-rpo-seed`, `protheus-system-seed`, `protheus-systemload-seed`, em `base/protheus-seed.yaml`) precisam ter provisionado os PVCs correspondentes — eles rodam em standby (`tail -f /dev/null` depois de provisionar), reagindo ao Image Updater por digest, não são Jobs. O `appserver-core` tem um `initContainer` (`wait-for-rpo`) que bloqueia a subida até o RPO estar de fato lá — protege contra ordem de subida errada.
+
+```bash
+kubectl get pods -n protheus-devops -l 'app in (protheus-rpo-seed,protheus-system-seed,protheus-systemload-seed,appserver-core,appserver-rest,appserver-telnet)'
+kubectl port-forward deployment/appserver-core 1234:1234 -n protheus-devops   # Multi-protocolo (SmartClient)
+kubectl port-forward deployment/appserver-rest 8400:8400 -n protheus-devops  # REST
+kubectl port-forward deployment/appserver-telnet 23:23 -n protheus-devops    # Telnet (monitor)
+```
+
+**Regra mais cara do projeto** (ver [`CLAUDE.md`](CLAUDE.md)): numa base genuinamente nova, `UPDDISTR`/`worker`/`compile` nunca rodam antes do usuário concluir o bootstrap manual (login inicial via SmartClient). Vale tanto para o Compose quanto para este cluster.
+
+7. Patches, compilação e atualização de dicionário sob demanda (`worker`/`compile`/`upddistr`)
+
+Os três papéis do `run.sh` do Compose (linhas 148-215) foram portados para o cluster como Jobs (`base/appserver-worker-job.yaml`, `-compile-job.yaml`, `-upddistr-job.yaml`), mas ficam **deliberadamente fora de `base/kustomization.yaml`** — o Argo CD nunca os toca sozinho (hooks `PreSync` re-rodam a cada sync, incompatível com a regra acima). São disparados só via script, que pausa `core`/`rest`/`telnet` (`replicas: 0` commitado no git, nunca `kubectl scale` direto — o Argo CD desfaria), aplica o Job, espera o veredito e restaura o que estava ativo:
+
+```bash
+./scripts/appserver-patch/run-job.sh worker    # aplica .ptm depositado em protheus-patches/
+./scripts/appserver-patch/run-job.sh compile   # compila .prw/.tlpp depositado em protheus-patches/
+./scripts/appserver-patch/run-job.sh upddistr  # atualização de dicionário (bootstrap já feito)
+```
+
+Detalhe completo (onde depositar cada insumo, por que `upddistr` não confia no status do Job) em [`scripts/appserver-patch/README.md`](scripts/appserver-patch/README.md) e [`docs/adr/0009-fase-e-orquestracao-via-git-e-veredito-por-arquivo.md`](docs/adr/0009-fase-e-orquestracao-via-git-e-veredito-por-arquivo.md).
+
+8. Validar o TOTVS SmartView
 
 O bootstrap do banco/usuário do SmartView (`smartview_dev`/`totvs`) roda automaticamente como um **hook `PreSync` do Argo CD** (`smartview-db-init-job.yaml`) — dispara antes da sincronização do restante da stack e se autolimpa (`hook-delete-policy: HookSucceeded`) depois de concluir, não fica pendurado como um Job "morto" no namespace.
 
@@ -115,9 +165,11 @@ A interface fica disponível em `http://localhost:7019`. A partir daí, a config
 
 ### 🔄 GitOps: Argo CD + Image Updater
 
-Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev`, `printer-dev` e `smartview-dev` por **digest** — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente.
+Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal` + `prune`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando por **digest** as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev`, `printer-dev`, `smartview-dev`, `appserver-dev` (uma entrada cobre core/rest/telnet — mesma imagem) e as 3 imagens de seed (`protheus-rpo-dev`, `protheus-system-dev`, `protheus-systemload-dev`) — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente. `appserver-dev-worker` (usado só pelos Jobs `worker`/`compile`, fora do Kustomize) fica de fora de propósito — sem manifesto rastreado pelo Kustomize, a entrada ficaria inerte; a tag é atualizada manualmente nos dois Jobs quando necessário.
 
 Os manifestos desses dois recursos (`Application` e `ImageUpdater`) ficam versionados em [`argocd/`](argocd/), pois eles vivem no namespace `argocd` do cluster, fora do que o Kustomize em `base/` gerencia — sem isso, a integração entre o Argo CD e este repositório existiria apenas como estado vivo do cluster, sem nenhum registro em git.
+
+**Importante ao bumpar versão de uma imagem**: como a `Application` usa `writeBackConfig: method: argocd`, o Image Updater grava o digest resolvido como *override* em `spec.source.kustomize.images` — esse override vence o que está no git enquanto a tag nova não for resolvida de novo. Editar só `base/*.yaml` não move nada sozinho: é preciso editar também o alias correspondente em `argocd/image-updater.yaml` (a tag de referência que o Image Updater usa pra checar o Docker Hub) e reaplicar com `kubectl apply -f argocd/image-updater.yaml` para forçar a reconciliação.
 
 **Bootstrap / Disaster Recovery** — se o cluster for recriado do zero, os únicos dois comandos necessários para reestabelecer toda a integração GitOps são:
 
@@ -138,6 +190,14 @@ Todos os repositórios `docker-*` que alimentam este cluster publicam suas image
 
 ### 🔁 Estratégia de Rollout: `Recreate` nos componentes com volume `hostPath`
 
-`postgres`, `license`, `webapp`, `printer` e `smartview` usam `strategy.type: Recreate` em vez do `RollingUpdate` padrão do Kubernetes. Motivo: todos montam um volume `hostPath` (via PVC) ou dispositivo de host (`/dev/mem`, no caso do `license`) — diferente de volumes de rede, o `hostPath` não impede dois pods de acessarem o mesmo caminho simultaneamente, então o `RollingUpdate` pode deixar o pod antigo e o novo rodando ao mesmo tempo sobre os mesmos dados por um instante. Foi exatamente isso que causou um restart transitório do Postgres (`postmaster.pid` inconsistente) durante uma troca de imagem — sem perda de dados, mas o `Recreate` elimina esse risco: derruba o pod antigo por completo antes de subir o novo. `dbaccess` não usa nenhum volume, então continua com `RollingUpdate` (não há dado compartilhado em risco).
+`postgres`, `license`, `webapp`, `printer`, `smartview`, os três seeds (`protheus-rpo-seed`/`-system-seed`/`-systemload-seed`) e o AppServer (`appserver-core`/`-rest`/`-telnet`) usam `strategy.type: Recreate` em vez do `RollingUpdate` padrão do Kubernetes. Motivo: todos montam um volume `hostPath` (via PVC) ou dispositivo de host (`/dev/mem`, no caso do `license`) — diferente de volumes de rede, o `hostPath` não impede dois pods de acessarem o mesmo caminho simultaneamente, então o `RollingUpdate` pode deixar o pod antigo e o novo rodando ao mesmo tempo sobre os mesmos dados por um instante. Foi exatamente isso que causou um restart transitório do Postgres (`postmaster.pid` inconsistente) durante uma troca de imagem — sem perda de dados, mas o `Recreate` elimina esse risco: derruba o pod antigo por completo antes de subir o novo. `dbaccess` não usa nenhum volume, então continua com `RollingUpdate` (não há dado compartilhado em risco).
+
+### 📜 Scripts e documentação auxiliar
+
+- [`docs/HANDOFF.md`](docs/HANDOFF.md) — estado vivo do projeto: onde a última sessão parou, backlog priorizado, regras operacionais já validadas (não reabrir sem motivo novo). Ponto de partida obrigatório antes de continuar qualquer trabalho.
+- [`docs/adr/`](docs/adr/) — decisões arquiteturais registradas (privilégios dos workloads, `Recreate` em hostPath, hooks idempotentes, `nodeAffinity` imutável, escopo só-Postgres, bind mount real dos nodes k3d, orquestração dos Jobs de patch via git, entre outras).
+- [`scripts/k3d-nodes/`](scripts/k3d-nodes/) — receita versionada para recriar o *container* de um node k3d já existente (`agent-0`/`server-0`) preservando os volumes nomeados e o bind mount real. Não recria o cluster do zero (rede + volumes novos) — ver item 4 do backlog em `docs/HANDOFF.md`.
+- [`scripts/appserver-patch/`](scripts/appserver-patch/) — `run-job.sh worker|compile|upddistr`, ver seção 7 acima.
+- [`docs/prompts/`](docs/prompts/) — prompts reutilizáveis para atualizar versão de binário TOTVS num repo `docker-protheus-*` e sincronizar as tags resultantes no `docker-compose.yaml` do repo irmão `docker-protheus-devops-stack`.
 
 
