@@ -1,3 +1,26 @@
+# Autenticação no Docker Hub -- achado em 2026-09-18: sem isso o controller faz pull
+# anônimo pra resolver digest de TODAS as imagens rastreadas em argocd/image-updater.yaml,
+# e esbarra no rate limit anônimo do Docker Hub sob uso intenso (trava a frota inteira, não
+# só uma imagem). Sintaxe do chart: 'secret:<namespace>/<nome>#<chave>' lê de um Secret
+# genérico do Kubernetes cuja chave contém "usuario:token" (nunca senha, usar Access Token
+# do Docker Hub -- Account Settings > Security > New Access Token, escopo Read-only basta).
+#
+# Pré-requisito antes de instalar/upgradar este release: o Secret precisa existir no
+# namespace 'argocd' ANTES do helm upgrade rodar (senão o controller sobe sem credencial e
+# só pega a mudança no próximo restart do pod). Criar assim, com usuário/token reais:
+#   kubectl create secret generic dockerhub-creds -n argocd \
+#     --from-literal=creds='SEU_USUARIO_DOCKERHUB:SEU_ACCESS_TOKEN'
+# Esse comando não fica em nenhum script deste repo de propósito -- a credencial não deve
+# passar por arquivo nem por histórico de shell compartilhável; rodar manualmente uma vez
+# (ou depois de recriar o cluster do zero, junto do passo 03-install-argocd.sh).
+config:
+  registries:
+    - name: Docker Hub
+      api_url: https://registry-1.docker.io
+      prefix: docker.io
+      ping: yes
+      credentials: secret:argocd/dockerhub-creds#creds
+
 resources:
   requests:
     cpu: 25m

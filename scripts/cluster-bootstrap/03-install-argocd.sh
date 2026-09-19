@@ -22,6 +22,16 @@ helm upgrade --install argocd argo/argo-cd \
   --wait --timeout 300s
 
 echo "=== Instalando Argo CD Image Updater ==="
+if ! kubectl get secret dockerhub-creds -n argocd >/dev/null 2>&1; then
+  echo "⚠️  Secret 'dockerhub-creds' não existe no namespace 'argocd' -- o Image Updater vai"
+  echo "   subir sem credencial e fazer pull anônimo do Docker Hub (rate limit real sob uso"
+  echo "   intenso, achado de 2026-09-18). Criar antes de continuar, com usuário/Access Token"
+  echo "   reais (nunca senha):"
+  echo "     kubectl create secret generic dockerhub-creds -n argocd \\"
+  echo "       --from-literal=creds='SEU_USUARIO_DOCKERHUB:SEU_ACCESS_TOKEN'"
+  echo "   Prosseguindo mesmo assim -- corrigir depois com o mesmo comando + um restart do"
+  echo "   deployment (kubectl rollout restart deployment argocd-image-updater -n argocd)."
+fi
 helm upgrade --install argocd-image-updater argo/argocd-image-updater \
   --namespace argocd \
   -f "${SCRIPT_DIR}/helm-values/argocd-image-updater.yaml" \
