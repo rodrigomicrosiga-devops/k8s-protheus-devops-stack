@@ -197,11 +197,18 @@ Todos os repositórios `docker-*` que alimentam este cluster publicam suas image
 
 `postgres`, `license`, `webapp`, `printer`, `smartview`, os três seeds (`protheus-rpo-seed`/`-system-seed`/`-systemload-seed`) e o AppServer (`appserver-core`/`-rest`/`-telnet`) usam `strategy.type: Recreate` em vez do `RollingUpdate` padrão do Kubernetes. Motivo: todos montam um volume `hostPath` (via PVC) ou dispositivo de host (`/dev/mem`, no caso do `license`) — diferente de volumes de rede, o `hostPath` não impede dois pods de acessarem o mesmo caminho simultaneamente, então o `RollingUpdate` pode deixar o pod antigo e o novo rodando ao mesmo tempo sobre os mesmos dados por um instante. Foi exatamente isso que causou um restart transitório do Postgres (`postmaster.pid` inconsistente) durante uma troca de imagem — sem perda de dados, mas o `Recreate` elimina esse risco: derruba o pod antigo por completo antes de subir o novo. `dbaccess` não usa nenhum volume, então continua com `RollingUpdate` (não há dado compartilhado em risco).
 
+### 💾 Backup / DR (Velero + MinIO)
+
+Backup diário (`Schedule protheus-daily`, 21:00 UTC, retenção de 7 dias) dos namespaces `protheus-devops` e `argocd`, com **restore validado ao vivo** (ADR 0015). Só entra o que nenhuma imagem reconstrói: o volume do RPO (`protheus-apo`, com `tttm120.rpo` já patcheado) e um **dump lógico** (`pg_dump -Fc`) do Postgres, gerado por um hook do Velero antes de cada backup. O bucket do MinIO fica em `k8s-volume/minio-backup`, um bind mount real do host — sobrevive a `k3d cluster delete`. Nada disso vai pro Argo CD: é aplicado por `scripts/cluster-bootstrap/` (`04-install-extras.sh`), como o resto da infraestrutura de suporte.
+
+Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 0015: **`hostPath` não tem backup de dado** (por isso `protheus-apo-pv` é `local`) e um restore mapeado pra outro namespace **precisa ser ensaiado** antes de rodar sobre volumes reais.
+
 ### 📜 Scripts e documentação auxiliar
 
 - [`docs/HANDOFF.md`](docs/HANDOFF.md) — estado vivo do projeto: onde a última sessão parou, backlog priorizado, regras operacionais já validadas (não reabrir sem motivo novo). Ponto de partida obrigatório antes de continuar qualquer trabalho.
 - [`docs/adr/`](docs/adr/) — decisões arquiteturais registradas (privilégios dos workloads, `Recreate` em hostPath, hooks idempotentes, `nodeAffinity` imutável, escopo só-Postgres, bind mount real dos nodes k3d, orquestração dos Jobs de patch via git, entre outras).
 - [`scripts/k3d-nodes/`](scripts/k3d-nodes/) — receita versionada para recriar o *container* de um node k3d já existente (`agent-0`/`server-0`) preservando os volumes nomeados e o bind mount real. Não recria o cluster do zero (rede + volumes novos) — ver item 3 do backlog em `docs/HANDOFF.md`.
+- [`scripts/k3d-nodes/post-boot.sh`](scripts/k3d-nodes/post-boot.sh) + [`k3d-node-rshared.service`](scripts/k3d-nodes/k3d-node-rshared.service) — reaplica a propagação de mount `rshared` nos nodes a cada boot do host (sem isso o `node-exporter` e o `node-agent` do Velero quebram).
 - [`scripts/appserver-patch/`](scripts/appserver-patch/) — `run-job.sh worker|compile|upddistr`, ver seção 7 acima.
 - [`docs/prompts/`](docs/prompts/) — prompts reutilizáveis para atualizar versão de binário TOTVS num repo `docker-protheus-*` e sincronizar as tags resultantes no `docker-compose.yaml` do repo irmão `docker-protheus-devops-stack`.
 

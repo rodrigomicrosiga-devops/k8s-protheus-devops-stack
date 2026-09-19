@@ -17,6 +17,11 @@ CLUSTER_NAME="protheus-cluster"
 K3D_IMAGE="rancher/k3s:v1.35.5-k3s1"
 APP_DATA_HOSTPATH="/media/rodrigo/dados/k8s-volume"
 
+# PVs do tipo `local` (Velero não faz backup de hostPath, ADR 0015) exigem que o
+# diretório já exista; num host novo o Argo CD sincroniza o Postgres antes de
+# qualquer outro passo poder criá-lo. Ele guarda o pg_dump que o Velero copia.
+mkdir -p -m 0700 "${APP_DATA_HOSTPATH}/postgres-dumps"
+
 echo "=== Criando cluster $CLUSTER_NAME ==="
 k3d cluster create "$CLUSTER_NAME" \
   --image "$K3D_IMAGE" \

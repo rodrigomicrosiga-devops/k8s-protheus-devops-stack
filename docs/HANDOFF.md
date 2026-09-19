@@ -4,7 +4,59 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-18, parte 4 — backlog original zerado)
+## Onde paramos (fim da sessão de 2026-09-19 — backup/DR com Velero, restore validado)
+
+Frente escolhida com o usuário: backup/DR. O Velero estava inerte (nunca fez backup e, mesmo que
+fizesse, não capturaria dado). Agora há backup diário e um restore validado ao vivo. Decisões,
+obstáculos e a receita de restore em `docs/adr/0015-backup-dr-velero.md`.
+
+**Verificar ao retomar, antes de qualquer coisa nova**:
+
+1. **Cluster saudável?** `kubectl get applications -n argocd protheus-devops-stack` (`Synced`/
+   `Healthy`), 13 pods de `protheus-devops` `Running`, `node-exporter` 2/2 `Running`.
+2. **Unit systemd instalada?** Não foi instalada por esta sessão (é ação no host). Sem ela, todo
+   reboot derruba o `node-exporter` e o `node-agent` do Velero por propagação de mount:
+   ```
+   ! sudo install -m 0644 scripts/k3d-nodes/k3d-node-rshared.service /etc/systemd/system/
+   ! sudo systemctl daemon-reload && sudo systemctl enable --now k3d-node-rshared.service
+   ```
+   Enquanto não instalar: `scripts/k3d-nodes/post-boot.sh` à mão depois de cada boot.
+3. **O backup diário roda?** `kubectl get backups -n velero` deve mostrar `protheus-daily-*`
+   `Completed` a partir de 2026-09-19 21:00 UTC. **Comportamento ainda não verificado**: se a
+   máquina estiver desligada às 21:00 UTC, o Velero deve rodar o backup vencido ao voltar — confirme
+   no primeiro ciclo real (se não rodar, mudar o horário ou disparar à mão).
+   Lembrete: usar `kubectl get backup <nome> -o jsonpath='{.status.phase}'`; o
+   `velero backup describe` no host dá erro de DNS do MinIO que **não** é falha do backup.
+4. **Compose parado?** `docker ps --filter name=protheus_` deve vir vazio. Esta sessão religou o
+   `protheus_postgres` sem querer deixá-lo no ar (causa: foi ligado na validação do webagent de
+   18/09 e nunca recebeu `docker stop` manual, então `unless-stopped` o religou no boot). Ao
+   encerrar uma sessão, conferir o `docker ps`, não basta ter rodado `docker compose stop`.
+
+**Pendências reais**:
+
+- **Encoding do banco do cluster está errado (UTF8, deveria ser WIN1252).** Achado ao restaurar o
+  dump num banco descartável: o init da imagem `docker-protheus-postgres` cria o banco com
+  `WIN1252`/`LC_COLLATE='C'`, mas só se ele ainda não existir; `base/postgres.env` define
+  `POSTGRES_DB=protheus`, então o entrypoint oficial cria o banco (UTF8) antes e o init pula. O
+  Compose usa `POSTGRES_DB=postgres` e não tem o problema. **Não corrigido**: exige recriar o
+  banco (ADR 0006: parar `core` e `dbaccess`, wipe, recriar, e passar pelo bootstrap manual do
+  `CLAUDE.md`) e reabre a convenção de 2026-09-16. Decidir com o usuário antes de agir.
+- **Restore *real* sobre o cluster principal não foi exercitado** (só o drill em namespace
+  descartável). Se algum dia precisar, o caminho é outro e vale um drill próprio.
+- Follow-up antigo do ADR 0013 segue aberto: `smartview-db-init` (`PreSync`) depende de
+  `postgres-secret` (recurso de `Sync`) e trava todo bootstrap do zero.
+
+**O que mudou no cluster nesta sessão**: `protheus-apo-pv` virou `local` (recriado pelo roteiro do
+ADR 0012, hashes do RPO idênticos antes/depois); novo `postgres-dumps-pv`/`-pvc` com hook de
+`pg_dump` no Postgres (1 rollout, sem `replicas: 0`); MinIO em `k8s-volume/minio-backup`;
+`node-agent` ligado; servidor do Velero de 256Mi para 1Gi; `Schedule protheus-daily`.
+Cópias de segurança do RPO, feitas antes de mexer, ficaram em
+`/media/rodrigo/dados/backups/{tttm120,custom}-pre-pv-local-20260919.rpo` (≈750MB; apagáveis).
+
+**Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
+ou aqui, leia "o cluster de dev".
+
+## Histórico condensado da sessão de 2026-09-18, parte 4 — backlog original zerado
 
 **Verificar ao retomar, antes de qualquer coisa nova**:
 

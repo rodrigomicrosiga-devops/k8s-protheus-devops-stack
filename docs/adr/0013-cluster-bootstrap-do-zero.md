@@ -85,6 +85,15 @@ uma seção de validação, não só a decisão em teoria):
    `01-fix-cgroupns.sh`** (rodado automaticamente no fim do script, mesmo dia) — o próximo drill
    não precisa do passo manual.
 
+   **Acréscimo de 2026-09-19 — não era só na recriação do node.** O mesmo defeito voltou depois
+   de um simples **reboot do host**: o Docker reinicia os containers de node e a propagação do
+   mount raiz volta a `private`, derrubando os dois `node-exporter`
+   (`CreateContainerError: path "/" is mounted on "/" but it is not a shared or slave mount`).
+   O fix no `01-fix-cgroupns.sh` só rodava quando um node era *recriado*. Fechado por
+   `scripts/k3d-nodes/post-boot.sh` (idempotente, descobre os nodes pelo label `k3d.role`) +
+   `scripts/k3d-nodes/k3d-node-rshared.service` (unit systemd, `After=docker.service`). Vale
+   também pro `node-agent` do Velero (ADR 0015), que precisa enxergar `/var/lib/kubelet/pods`.
+
 ## Consequências
 - Fecha o item 3 do backlog — receita completa versionada, testada ao vivo (ver Validação).
 - `scripts/cluster-bootstrap/01-fix-cgroupns.sh` generaliza a lógica do ADR 0008/`scripts/k3d-nodes/`

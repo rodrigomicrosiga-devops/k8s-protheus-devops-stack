@@ -40,9 +40,22 @@ helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheu
   --wait --timeout 300s
 
 echo "=== Instalando MinIO (backend do Velero) ==="
+# O bucket precisa viver num bind mount real do host, senão morre junto com um
+# `k3d cluster delete` (ADR 0015). O diretório tem que existir, com dono
+# uid 1000 (runAsUser do MinIO -- hostPath ignora fsGroup), ANTES do pod subir.
+# O host é dono do caminho: cria direto, sem passar pelo node.
+BACKUP_DIR="/media/rodrigo/dados/k8s-volume/minio-backup"
+mkdir -p "$BACKUP_DIR"
+if [ "$(stat -c %u "$BACKUP_DIR")" != "1000" ]; then
+  echo "❌ $BACKUP_DIR não pertence ao uid 1000 (MinIO). Rode: sudo chown 1000:1000 $BACKUP_DIR" >&2
+  exit 1
+fi
+kubectl create namespace velero --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply -f "${SCRIPT_DIR}/backup/minio-storage.yaml"
 helm upgrade --install minio minio/minio \
   --namespace velero --create-namespace \
   -f "${VALUES_DIR}/minio.yaml" \
+  -f "${VALUES_DIR}/minio-persistence.yaml" \
   --wait --timeout 180s
 
 echo "=== Instalando Velero ==="
@@ -53,7 +66,11 @@ echo "=== Instalando Velero ==="
 helm upgrade --install velero vmware-tanzu/velero \
   --namespace velero \
   -f "${VALUES_DIR}/velero.yaml" \
+  -f "${VALUES_DIR}/velero-overrides.yaml" \
   --wait --timeout 180s
+
+echo "=== Agendando o backup diário ==="
+kubectl apply -f "${SCRIPT_DIR}/backup/velero-schedule.yaml"
 
 echo
 echo "✅ Componentes extras instalados. Validar:"
