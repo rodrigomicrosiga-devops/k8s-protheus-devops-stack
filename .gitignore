@@ -13,4 +13,4 @@ scripts/cluster-bootstrap/helm-values/*.yaml
 !scripts/cluster-bootstrap/helm-values/falco.yaml
 !scripts/cluster-bootstrap/helm-values/sealed-secrets.yaml
 !scripts/cluster-bootstrap/helm-values/minio-persistence.yaml
-!scripts/cluster-bootstrap/helm-values/velero-node-agent.yaml
+!scripts/cluster-bootstrap/helm-values/velero-overrides.yaml

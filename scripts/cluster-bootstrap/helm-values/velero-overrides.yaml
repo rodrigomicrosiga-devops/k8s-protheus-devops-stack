@@ -1,0 +1,21 @@
+# Overlay SEM segredo, combinado com velero.yaml (cifrado) pelo Helm:
+#   helm upgrade --install velero vmware-tanzu/velero -f velero.yaml -f velero-overrides.yaml
+# Só o que não é sensível fica aqui, pra mudar configuração sem decriptar as
+# credenciais (ADR 0011). Ver ADR 0015.
+
+# O node-agent é quem de fato lê o conteúdo dos volumes (File System Backup).
+# Sem ele o Velero só salva objetos Kubernetes, nunca dado -- estava desligado
+# (deployNodeAgent: false) até 2026-09-19. Requer PVs do tipo `local`, não
+# `hostPath` (limitação documentada do Velero).
+deployNodeAgent: true
+
+# O limite original (256Mi) foi dimensionado quando o Velero só guardava
+# objetos. Com File System Backup o servidor foi OOMKilled (exit 137) em
+# 2026-09-19 no meio da cópia do volume do RPO (~755MB), derrubando o backup:
+# "found a backup with status InProgress during the server starting".
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 1Gi

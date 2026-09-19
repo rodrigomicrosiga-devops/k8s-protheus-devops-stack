@@ -1,0 +1,41 @@
+# Backup diário do estado que nenhum `git clone` reconstrói.
+#
+# O que entra:
+#   - namespace protheus-devops: objetos + dados dos 2 volumes anotados
+#     (postgres-dumps via hook de pg_dump, protheus-apo via rpo-seed) -- ver
+#     as anotações backup.velero.io/* em base/postgres.yaml e base/protheus-seed.yaml.
+#   - namespace argocd: os overrides de digest do Image Updater vivem em
+#     Application.spec.source.kustomize.images (writeBackConfig: argocd), só no
+#     cluster, nunca no git -- é estado real, e o Secret dockerhub-creds.
+#
+# Horário: 21:00 UTC (18:00 em -03). A máquina é desligada de madrugada (ex.:
+# 02:09Z em 2026-09-19); um cron às 03:00 quase nunca rodaria. O controller do
+# Velero deve executar um backup vencido ao voltar (a confirmar no primeiro
+# ciclo real após um desligamento -- ver ADR 0015).
+#
+# snapshotVolumes: false -- não há VolumeSnapshotLocation; os volumes são
+# copiados por File System Backup (node-agent), só os anotados (opt-in).
+# TTL 168h = 7 dias.
+#
+# ATENÇÃO: o backup inclui Secrets em texto (postgres-secret, etc.) no bucket do
+# MinIO, que fica em disco local protegido só pelas credenciais do MinIO.
+# Aceitável pro escopo (cluster local, single-dev); reavaliar antes de qualquer
+# uso além disso.
+#
+# Fora do Kustomize/Argo CD, como o resto de scripts/cluster-bootstrap/:
+#   kubectl apply -f scripts/cluster-bootstrap/backup/velero-schedule.yaml
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: protheus-daily
+  namespace: velero
+spec:
+  schedule: "0 21 * * *"
+  template:
+    includedNamespaces:
+      - protheus-devops
+      - argocd
+    storageLocation: default
+    snapshotVolumes: false
+    defaultVolumesToFsBackup: false
+    ttl: 168h0m0s
