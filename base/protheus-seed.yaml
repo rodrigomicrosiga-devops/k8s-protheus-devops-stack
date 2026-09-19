@@ -215,6 +215,12 @@ spec:
     metadata:
       labels:
         app: protheus-rpo-seed
+      annotations:
+        # Velero (File System Backup): protheus-apo é montado por 4 pods
+        # (este seed + core/rest/telnet), mas só este é anotado -- o backup
+        # copia o volume uma vez, não quatro. O seed é standby e não escreve
+        # durante o backup. Ver ADR 0015.
+        backup.velero.io/backup-volumes: protheus-apo
     spec:
       imagePullSecrets:
         - name: regcred

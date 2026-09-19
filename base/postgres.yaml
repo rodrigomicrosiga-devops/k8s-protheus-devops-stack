@@ -38,6 +38,50 @@ spec:
       storage: 10Gi
   volumeName: postgres-pv
 ---
+# Destino do dump lógico que o Velero dispara antes de cada backup (hook
+# pre.hook.backup.velero.io no Deployment abaixo). É ESTE volume -- não o
+# postgres-pv -- que o Velero copia: o postgres-pv é hostPath, que o File
+# System Backup não suporta, e um dump consistente restaura com garantia
+# enquanto o data dir cru é só crash-consistent. Nasce como `local` (sem
+# retrofit de PV existente, ver ADR 0004). O diretório precisa existir antes:
+#   docker exec k3d-protheus-cluster-agent-0 mkdir -p <path> && chmod 0700 <path>
+# Ver ADR 0015.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-dumps-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  local:
+    path: /media/rodrigo/dados/k8s-volume/postgres-dumps
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-dumps-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+  volumeName: postgres-dumps-pv
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,6 +98,19 @@ spec:
     metadata:
       labels:
         app: postgres
+      annotations:
+        # Velero: antes de copiar os volumes, gera o dump lógico dos dois
+        # bancos em /dumps. Escreve em .tmp e renomeia, pra uma falha no meio
+        # nunca trocar um dump bom por um pela metade. on-error Fail: um
+        # backup sem dump consistente não deve parecer bem-sucedido.
+        # Medido em 2026-09-19: protheus ~60MB comprimido, ~23s.
+        pre.hook.backup.velero.io/container: postgres
+        pre.hook.backup.velero.io/command: '["/bin/bash","-c","set -e; for db in protheus smartview_dev; do pg_dump -Fc -U protheus -d $db -f /dumps/$db.dump.tmp && mv /dumps/$db.dump.tmp /dumps/$db.dump; done"]'
+        pre.hook.backup.velero.io/timeout: 300s
+        pre.hook.backup.velero.io/on-error: Fail
+        # Só o volume de dumps entra no backup (opt-in). postgres-storage é
+        # hostPath e o Velero o pularia de qualquer forma.
+        backup.velero.io/backup-volumes: postgres-dumps
     spec:
       containers:
         - name: postgres
@@ -79,10 +136,15 @@ spec:
           volumeMounts:
             - mountPath: /var/lib/postgresql/data
               name: postgres-storage
+            - mountPath: /dumps
+              name: postgres-dumps
       volumes:
         - name: postgres-storage
           persistentVolumeClaim:
             claimName: postgres-pvc
+        - name: postgres-dumps
+          persistentVolumeClaim:
+            claimName: postgres-dumps-pvc
 ---
 apiVersion: v1
 kind: Service
