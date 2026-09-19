@@ -1,0 +1,8 @@
+# Overlay SEM segredo, combinado com velero.yaml (cifrado) pelo Helm:
+#   helm upgrade --install velero vmware-tanzu/velero -f velero.yaml -f velero-node-agent.yaml
+#
+# O node-agent é quem de fato lê o conteúdo dos volumes (File System Backup).
+# Sem ele o Velero só salva objetos Kubernetes, nunca dado -- estava desligado
+# (deployNodeAgent: false) até 2026-09-19. Requer PVs do tipo `local`, não
+# `hostPath` (limitação documentada do Velero) -- ver ADR 0015.
+deployNodeAgent: true

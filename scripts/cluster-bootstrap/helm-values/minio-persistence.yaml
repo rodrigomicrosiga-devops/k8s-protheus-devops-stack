@@ -1,0 +1,8 @@
+# Overlay SEM segredo, combinado com minio.yaml (cifrado) pelo Helm:
+#   helm upgrade --install minio minio/minio -f minio.yaml -f minio-persistence.yaml
+# Separado do arquivo cifrado de propósito -- assim mudar configuração não
+# exige decriptar/recriptar as credenciais (ADR 0011).
+# Pré-requisito: ../backup/minio-storage.yaml aplicado.
+persistence:
+  enabled: true
+  existingClaim: minio-backup-pvc

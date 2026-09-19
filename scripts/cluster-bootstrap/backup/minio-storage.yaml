@@ -1,0 +1,55 @@
+# Armazenamento do MinIO (backend do Velero) em um caminho que SOBREVIVE a
+# `k3d cluster delete`.
+#
+# Por quê: o PVC dinâmico que o chart do MinIO cria por padrão usa a
+# StorageClass local-path, que grava em /var/lib/rancher/k3s/storage -- e no
+# agent-0 isso é um volume Docker ANÔNIMO, destruído junto com o cluster.
+# Backup que morre no mesmo desastre que ele deveria cobrir não é backup.
+# Só /media/rodrigo/dados/k8s-volume é bind mount real do host (ADR 0007/0008,
+# foi o que preservou os dados no drill de 2026-09-18).
+#
+# hostPath (e não `local`) de propósito: ninguém faz backup do backup, então
+# aqui não há motivo pra abrir mão da simplicidade. O dono do diretório precisa
+# ser uid 1000 (runAsUser do MinIO) -- hostPath ignora fsGroup:
+#   docker exec k3d-protheus-cluster-agent-0 sh -c \
+#     'mkdir -p <path> && chown 1000:1000 <path> && chmod 0750 <path>'
+#
+# Fora do Kustomize/Argo CD, como o resto de scripts/cluster-bootstrap/ (o
+# MinIO em si é instalado por Helm, não pelo Argo CD). Aplicar ANTES de instalar
+# ou atualizar o MinIO: kubectl apply -f scripts/cluster-bootstrap/backup/minio-storage.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: minio-backup-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /media/rodrigo/dados/k8s-volume/minio-backup
+  # nodeAffinity desde o nascimento: é imutável em PV já existente (ADR 0004).
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-backup-pvc
+  namespace: velero
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: minio-backup-pv
