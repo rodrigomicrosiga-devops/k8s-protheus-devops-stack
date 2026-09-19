@@ -205,7 +205,7 @@ metadata:
   name: protheus-rpo-seed
   namespace: protheus-devops
 spec:
-  replicas: 0
+  replicas: 1
   strategy:
     type: Recreate
   selector:
