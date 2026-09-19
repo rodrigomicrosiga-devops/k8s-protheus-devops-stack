@@ -4,7 +4,34 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-18, parte 3)
+## Onde paramos (fim da sessão de 2026-09-18, parte 4)
+
+**Verificar ao retomar, antes de qualquer coisa nova**:
+
+1. **Item 4 do backlog (auth Docker Hub no Image Updater) fechado de ponta a ponta.** Usuário
+   criou o Secret (`kubectl create secret generic dockerhub-creds -n argocd
+   --from-literal=creds=...`) e rodou o `helm upgrade` com o values novo (commit `fe6e83d`).
+   Confirmado ao vivo: log do `argocd-image-updater-controller` mostrou cache warm-up limpo
+   (`images_considered=11 images_skipped=0 errors=0`, zero `toomanyrequests`). O digest
+   `e87ee71e...` do `webagent-dev:1.1.1` que eu tinha marcado como "inconsistente" na rodada
+   anterior era, na verdade, correto — validado contra a API do Docker Hub diretamente
+   (`docker-content-digest` bate exato); não era um bug do Image Updater, eu só não tinha
+   revalidado depois de mais um rebuild.
+2. **Item 1 (WebAgent multi-SO) fechado de ponta a ponta, incluindo k8s.** O cluster já estava
+   rodando os digests multi-SO certos (`appserver-dev:24.3.1.9@sha256:2d8679ce...`,
+   `webagent-dev:1.1.1@sha256:e87ee71e...`) quando o rate limit foi resolvido — mas
+   `appserver-core` tinha subido ~90s antes do sidecar `webagent` terminar de extrair os 8
+   arquivos no volume compartilhado, então o `.ini` só tinha as 2 chaves Linux (a corrida já
+   documentada na ADR 0014). Resolvido com `kubectl rollout restart deployment appserver-core
+   appserver-rest appserver-telnet`. Confirmado: `[WEBAGENT]` com as 5 chaves
+   (`Windows_x86`/`Windows_x64`/`Darwin_universal`/`Linux_x64_deb`/`Linux_x64_rpm`),
+   `Application` `Synced`/`Healthy`, 171 tabelas intactas.
+3. **Backlog original do projeto está zerado.** Não há item aberto conhecido no momento — ver
+   "Backlog aberto, por prioridade" abaixo (deve estar vazio ou só com itens residuais menores,
+   nenhum bloqueando). Próxima sessão pode abrir um item novo do zero com o usuário, sem
+   pendência herdada.
+
+## Histórico condensado da sessão de 2026-09-18, parte 3
 
 **Verificar ao retomar, antes de qualquer coisa nova**:
 
@@ -630,42 +657,29 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
    - **Achado real**: numa subida simultânea do zero, `appserver-core` pode gerar o `.ini` antes
      do sidecar terminar de provisionar (mesma condição de corrida silenciosa que já existe pra
      `webapp`/`printer`, não é bug novo) — resolve com um restart, irrelevante em uso real.
-   - **Windows/macOS — implementado e validado em rodada seguinte, mesmo dia**: usuário
-     forneceu os artefatos reais (Windows x86/x64 `.zip`, macOS Universal/x64 `.dmg`).
-     `Dockerfile` estendido pra extrair `.zip`/`.dmg`, `entrypoint.sh` do `appserver` detecta as
-     5 chaves dinamicamente (`Windows_x86`/`Windows_x64`/`Darwin_universal`/`Linux_x64_deb`/
-     `Linux_x64_rpm`), `.msi` entregue no volume mas de propósito fora do `.ini` (fluxo GPO
-     separado, sem chave documentada). Validado ao vivo via Compose com imagens reais
-     publicadas. **Propagação pro k8s bloqueada** por um achado novo — ver item 4 abaixo.
-4. **`argocd-image-updater` sem autenticação no Docker Hub — lado do código fechado em
-   2026-09-18 (commit `fe6e83d`), falta só a ação manual do usuário**: o controller sempre fez
-   pull anônimo do Docker Hub pra resolver digest de TODAS as ~11 imagens rastreadas
-   (`argocd/image-updater.yaml`), e foi rate-limited (`toomanyrequests: You have reached your
-   unauthenticated pull rate limit`) sob o uso intenso desta sessão. Efeito concreto observado: o
-   override de digest em `Application.spec.source.kustomize.images` ficou parado numa versão
-   antiga do `appserver-dev`/`webagent-dev`, e o `selfHeal` reverte qualquer `kubectl set image`
-   manual de volta pro valor cacheado (comportamento correto do Argo CD, só expõe o problema de
-   raiz). Sem risco pro cluster (segue `Synced`/`Healthy`, rodando a versão anterior, funcional).
-   `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml` já referencia
-   `credentials: secret:argocd/dockerhub-creds#creds` (sintaxe confirmada via `helm show values
-   argo/argocd-image-updater` local, chart `argocd-image-updater-1.3.1`); `03-install-argocd.sh`
-   avisa se o Secret não existir antes do `helm upgrade`. **Pendente, ação do usuário** (não
-   automatizável de propósito — credencial não deve passar por script nem histórico de shell
-   compartilhável):
-   ```
-   kubectl create secret generic dockerhub-creds -n argocd \
-     --from-literal=creds='SEU_USUARIO_DOCKERHUB:SEU_ACCESS_TOKEN'
-   helm upgrade --install argocd-image-updater argo/argocd-image-updater \
-     --namespace argocd -f scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml
-   ```
-   Usar Access Token do Docker Hub (Account Settings → Security → New Access Token, escopo
-   Read-only basta), nunca a senha da conta. Confirmado no cluster atual: Secret ainda não
-   existe (`kubectl get secret dockerhub-creds -n argocd` → `NotFound`), release
-   `argocd-image-updater` já instalado (revision 1) — precisa do `helm upgrade` acima pra pegar
-   o values novo, não sobe sozinho. Depois de rodar os dois comandos, verificar:
-   `kubectl logs -n argocd deployment/argocd-image-updater | grep -i docker.io` não deve mais
-   mostrar `toomanyrequests`, e os digests do webagent/appserver multi-SO (item 1 acima) devem
-   propagar sozinhos em poucos minutos.
+   - **Windows/macOS — implementado e validado em rodada seguinte, mesmo dia, agora incluindo
+     k8s**: usuário forneceu os artefatos reais (Windows x86/x64 `.zip`, macOS Universal/x64
+     `.dmg`). `Dockerfile` estendido pra extrair `.zip`/`.dmg`, `entrypoint.sh` do `appserver`
+     detecta as 5 chaves dinamicamente (`Windows_x86`/`Windows_x64`/`Darwin_universal`/
+     `Linux_x64_deb`/`Linux_x64_rpm`), `.msi` entregue no volume mas de propósito fora do `.ini`
+     (fluxo GPO separado, sem chave documentada). Validado ao vivo em Compose e k8s com imagens
+     reais publicadas — cluster mostrou as 5 chaves corretas em `appserver.ini` depois de um
+     `kubectl rollout restart` (ver item 4 abaixo, mesma corrida sidecar-vs-core já conhecida).
+4. **`argocd-image-updater` sem autenticação no Docker Hub — fechado de ponta a ponta em
+   2026-09-18** (código no commit `fe6e83d`, ação do usuário concluída na sessão seguinte):
+   `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml` referencia
+   `credentials: secret:argocd/dockerhub-creds#creds`; usuário criou o Secret com credencial real
+   e rodou `helm upgrade`. Confirmado ao vivo: `argocd-image-updater-controller` (revision 2 do
+   release) processou cache warm-up limpo (`images_considered=11 images_skipped=0 errors=0`),
+   zero `toomanyrequests` nos logs. O digest `e87ee71e...` do `webagent-dev:1.1.1`, que eu tinha
+   marcado como suspeito/inconsistente na rodada anterior, era na verdade correto — validado
+   direto contra a API do Docker Hub (`docker-content-digest` bate exato); não era bug do Image
+   Updater, só não tinha revalidado depois de outro rebuild. Efeito colateral confirmado: os
+   pods já estavam rodando os digests multi-SO certos, mas `appserver-core` tinha subido ~90s
+   antes do sidecar `webagent` terminar de extrair os 8 arquivos — resolvido com `kubectl
+   rollout restart deployment appserver-core appserver-rest appserver-telnet`. `Application`
+   `Synced`/`Healthy`, 171 tabelas intactas, `[WEBAGENT]` com as 5 chaves confirmado via `kubectl
+   exec deploy/appserver-core -- grep -A8 WEBAGENT appserver.ini`.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 

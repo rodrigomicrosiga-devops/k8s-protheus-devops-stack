@@ -1,11 +1,11 @@
 # ADR 0014 — WebAgent como sidecar de entrega, não embutido no `appserver-core`
 
 ## Status
-Aceito e implementado em 2026-09-18 — Compose primeiro, depois k8s. Estendido pra multi-SO
-(Windows x86/x64, macOS Universal/x64) na mesma data. Validado ao vivo nos dois ambientes na
-versão Linux-only; a extensão multi-SO está validada ao vivo só no Compose — a propagação pro
-k8s está bloqueada por um achado novo, não relacionado ao desenho deste ADR (ver seção
-"Propagação pro k8s" abaixo).
+Aceito, implementado e validado ao vivo nos dois ambientes (Compose e k8s), incluindo a
+extensão multi-SO (Windows x86/x64, macOS Universal/x64) — fechado em 2026-09-18. A propagação
+pro k8s da extensão multi-SO ficou bloqueada por um achado colateral (Image Updater sem
+autenticação no Docker Hub, ver seção "Propagação pro k8s" abaixo) e foi desbloqueada e
+confirmada na mesma data, depois do usuário configurar a credencial.
 
 ## Contexto
 O WebAgent é um utilitário **client-side** do TOTVS SmartClient — instalado na estação do
@@ -97,9 +97,10 @@ Sequência confirmada em produção real, nos dois ambientes — primeiro só Li
   `appserver-dev:24.3.1.9`) com digest novo em cada uma; `.ini` gerado com as 5 chaves corretas,
   todos os instaladores no volume compartilhado, boot limpo, nenhuma regressão na parte Linux já
   validada.
-- **k8s (multi-SO)**: **não validado ainda** — ver seção seguinte.
+- **k8s (multi-SO)**: validado ao vivo na sessão seguinte, depois de desbloquear o achado — ver
+  seção "Propagação pro k8s" abaixo.
 
-## Propagação pro k8s (multi-SO) — bloqueada, achado novo e maior
+## Propagação pro k8s (multi-SO) — achado novo, encontrado e fechado no mesmo dia
 
 Tentando confirmar a extensão multi-SO no cluster, um `kubectl set image` manual nos
 deployments (`appserver-core`/`-rest`/`-telnet`/`webagent`) foi revertido automaticamente pelo
@@ -116,20 +117,36 @@ Hub. Isso não é um problema introduzido pelo webagent; é uma lacuna pré-exis
 inteira (as ~11 imagens em `argocd/image-updater.yaml`), só exposta agora pelo volume de
 pulls/testes desta sessão batendo no limite anônimo.
 
-Decisão tomada: **não forçar o override do `Application` diretamente**. Motivo: no meio da
-investigação, o valor cacheado no override mostrou um TERCEIRO digest (`e87ee71e...`)
-inconsistente com os dois valores que eu mesmo confirmei de forma independente via `docker
-manifest inspect` (`appserver-dev:24.3.1.9` → `8a7ed2af...`, `webagent-dev:1.1.1` →
-`dcf39033...`) — sinal de que algo na cadeia de resolução está inconsistente o bastante pra não
-confiar num patch manual. Cluster verificado estável do jeito que está: `Synced`/`Healthy`, 171
-tabelas intactas, todos os pods `Running`, rodando a versão anterior (funcional, só sem as 3
-chaves novas do `[WEBAGENT]`). Registrado como item novo de backlog em `docs/HANDOFF.md`, com
-correção recomendada (credenciais Docker Hub no Helm values do Image Updater) pendente de
-execução real numa sessão futura — depende de credencial que só o usuário tem.
+Decisão tomada na hora: **não forçar o override do `Application` diretamente**. Motivo: o valor
+cacheado no override mostrava um digest (`e87ee71e...`) diferente dos dois que eu tinha
+confirmado antes via `docker manifest inspect` (`appserver-dev:24.3.1.9` → `8a7ed2af...`,
+`webagent-dev:1.1.1` → `dcf39033...`) — sem saber ainda se era inconsistência real ou só uma
+foto antiga minha, não valia o risco de aplicar o digest errado manualmente. Cluster verificado
+estável do jeito que estava: `Synced`/`Healthy`, 171 tabelas intactas, todos os pods `Running`,
+rodando a versão anterior (funcional, só sem as 3 chaves novas do `[WEBAGENT]`). Registrado como
+item novo de backlog em `docs/HANDOFF.md`, com correção recomendada (credenciais Docker Hub no
+Helm values do Image Updater).
+
+**Correção aplicada e validada na sessão seguinte, mesmo dia**: `scripts/cluster-bootstrap/
+helm-values/argocd-image-updater.yaml` passou a referenciar `credentials:
+secret:argocd/dockerhub-creds#creds` (sintaxe confirmada via `helm show values
+argo/argocd-image-updater` local, chart `argocd-image-updater-1.3.1`), commit `fe6e83d`. Usuário
+criou o Secret com usuário/Access Token reais do Docker Hub e rodou `helm upgrade`. Log do
+controller confirmou o fim do rate limit: cache warm-up processou `images_considered=11
+images_skipped=0 errors=0`, zero `toomanyrequests`. O digest `e87ee71e...` que eu tinha marcado
+como suspeito **era o correto** — validado direto contra a API do registry
+(`registry-1.docker.io`, header `docker-content-digest` bate exato); não era bug do Image
+Updater nem inconsistência real, só uma foto desatualizada minha de antes do último rebuild.
+Como efeito, os pods já estavam de fato rodando os digests multi-SO certos antes mesmo da
+correção — só o `.ini` do `appserver-core` ainda mostrava só as 2 chaves Linux, pela mesma
+condição de corrida sidecar-vs-core descrita na seção "Validação" acima (o `webagent` novo subiu
+~90s depois do `appserver-core`). Resolvido com `kubectl rollout restart deployment
+appserver-core appserver-rest appserver-telnet`; `[WEBAGENT]` confirmado com as 5 chaves, 171
+tabelas intactas.
 
 ## Consequências
-- Fecha o último item do backlog original (`webagent`) — implementado, validado (Compose e k8s
-  na versão Linux; Compose na versão multi-SO), documentado.
+- Fecha o último item do backlog original (`webagent`) — implementado, validado e documentado
+  nos dois ambientes, na versão Linux e na multi-SO.
 - Imagem do `appserver-core`/`-rest`/`-telnet` continua exatamente do mesmo tamanho — nenhum
   instalador de SO foi embutido nela, resolvendo a restrição original do usuário, mesmo agora com
   5 formatos de instalador cobertos.
@@ -138,7 +155,8 @@ execução real numa sessão futura — depende de credencial que só o usuário
 - Extensão pra Windows/macOS confirmou a extensibilidade prevista: foi só (a) baixar o pacote,
   (b) colocar no repo `docker-protheus-webagent`, (c) adicionar a chave correspondente na lógica
   de detecção do `entrypoint.sh` — sem mudança de arquitetura, exatamente como esperado.
-- **Achado colateral, fora do escopo original deste ADR**: expôs uma lacuna de autenticação no
-  `argocd-image-updater` (rate limit anônimo do Docker Hub) que afeta toda a frota de imagens
-  rastreadas, não só o webagent — novo item de backlog em `docs/HANDOFF.md`, correção pendente
-  de credencial do usuário.
+- **Achado colateral, fora do escopo original deste ADR, corrigido na mesma data**: expôs uma
+  lacuna de autenticação no `argocd-image-updater` (rate limit anônimo do Docker Hub) que afeta
+  toda a frota de imagens rastreadas, não só o webagent — corrigida (item 4 em
+  `docs/HANDOFF.md`), deixando o mecanismo de auto-update por digest genuinamente confiável de
+  novo pra frota inteira, não só pra este componente.
