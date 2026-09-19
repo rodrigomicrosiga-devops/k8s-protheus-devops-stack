@@ -105,7 +105,7 @@ spec:
         # backup sem dump consistente não deve parecer bem-sucedido.
         # Medido em 2026-09-19: protheus ~60MB comprimido, ~23s.
         pre.hook.backup.velero.io/container: postgres
-        pre.hook.backup.velero.io/command: '["/bin/bash","-c","set -e; for db in protheus smartview_dev; do pg_dump -Fc -U protheus -d $db -f /dumps/$db.dump.tmp && mv /dumps/$db.dump.tmp /dumps/$db.dump; done"]'
+        pre.hook.backup.velero.io/command: '["/bin/bash","-c","set -e; for db in protheus smartview_dev; do [ -n \"$(psql -U protheus -d postgres -lqt | grep -w $db)\" ] || continue; pg_dump -Fc -U protheus -d $db -f /dumps/$db.dump.tmp && mv /dumps/$db.dump.tmp /dumps/$db.dump; done"]'
         pre.hook.backup.velero.io/timeout: 300s
         pre.hook.backup.velero.io/on-error: Fail
         # Só o volume de dumps entra no backup (opt-in). postgres-storage é
