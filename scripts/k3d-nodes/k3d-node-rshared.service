@@ -1,0 +1,26 @@
+# Unit systemd que reaplica o mount rshared nos nodes k3d a cada boot.
+# Ver scripts/k3d-nodes/post-boot.sh pro porquê.
+#
+# Instalação (no host, uma vez):
+#   sudo install -m 0644 scripts/k3d-nodes/k3d-node-rshared.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now k3d-node-rshared.service
+#
+# Ajuste User=/KUBECONFIG abaixo se o seu usuário/kubeconfig forem outros.
+[Unit]
+Description=Reaplica mount rshared nos nodes k3d (protheus-cluster)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=rodrigo
+Environment=KUBECONFIG=/home/rodrigo/.kube/config
+ExecStart=/media/rodrigo/dados/k8s-protheus-devops-stack/scripts/k3d-nodes/post-boot.sh
+# Os containers de node sobem por restart policy do Docker, um pouco depois
+# do docker.service -- o script já espera até 120s por eles.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
