@@ -4,32 +4,35 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-18, parte 4)
+## Onde paramos (fim da sessão de 2026-09-18, parte 4 — backlog original zerado)
 
 **Verificar ao retomar, antes de qualquer coisa nova**:
 
-1. **Item 4 do backlog (auth Docker Hub no Image Updater) fechado de ponta a ponta.** Usuário
-   criou o Secret (`kubectl create secret generic dockerhub-creds -n argocd
-   --from-literal=creds=...`) e rodou o `helm upgrade` com o values novo (commit `fe6e83d`).
-   Confirmado ao vivo: log do `argocd-image-updater-controller` mostrou cache warm-up limpo
-   (`images_considered=11 images_skipped=0 errors=0`, zero `toomanyrequests`). O digest
-   `e87ee71e...` do `webagent-dev:1.1.1` que eu tinha marcado como "inconsistente" na rodada
-   anterior era, na verdade, correto — validado contra a API do Docker Hub diretamente
-   (`docker-content-digest` bate exato); não era um bug do Image Updater, eu só não tinha
-   revalidado depois de mais um rebuild.
-2. **Item 1 (WebAgent multi-SO) fechado de ponta a ponta, incluindo k8s.** O cluster já estava
-   rodando os digests multi-SO certos (`appserver-dev:24.3.1.9@sha256:2d8679ce...`,
-   `webagent-dev:1.1.1@sha256:e87ee71e...`) quando o rate limit foi resolvido — mas
-   `appserver-core` tinha subido ~90s antes do sidecar `webagent` terminar de extrair os 8
-   arquivos no volume compartilhado, então o `.ini` só tinha as 2 chaves Linux (a corrida já
-   documentada na ADR 0014). Resolvido com `kubectl rollout restart deployment appserver-core
-   appserver-rest appserver-telnet`. Confirmado: `[WEBAGENT]` com as 5 chaves
-   (`Windows_x86`/`Windows_x64`/`Darwin_universal`/`Linux_x64_deb`/`Linux_x64_rpm`),
-   `Application` `Synced`/`Healthy`, 171 tabelas intactas.
-3. **Backlog original do projeto está zerado.** Não há item aberto conhecido no momento — ver
-   "Backlog aberto, por prioridade" abaixo (deve estar vazio ou só com itens residuais menores,
-   nenhum bloqueando). Próxima sessão pode abrir um item novo do zero com o usuário, sem
-   pendência herdada.
+1. **Cluster ainda saudável?**
+   ```
+   kubectl get applications -n argocd protheus-devops-stack   # Synced / Healthy
+   kubectl get pods -n protheus-devops                         # todos Running, sem restart novo
+   kubectl exec deployment/postgres -n protheus-devops -- \
+     psql -U protheus -d protheus -tAc \
+     "select count(*) from information_schema.tables where table_schema='public';"  # 171
+   ```
+2. **Image Updater segue autenticado?** `kubectl logs -n argocd deployment/argocd-image-updater-controller
+   --tail=50 | grep -i toomanyrequests` não deve retornar nada. Se voltar a aparecer, o Secret
+   `dockerhub-creds` (namespace `argocd`) pode ter expirado/sido revogado no Docker Hub — Access
+   Tokens não expiram por padrão, mas vale checar Account Settings → Security se isso acontecer.
+3. **WebAgent multi-SO segue completo?** `kubectl exec deploy/appserver-core -n protheus-devops --
+   grep -A8 WEBAGENT appserver.ini` deve mostrar as 5 chaves
+   (`Windows_x86`/`Windows_x64`/`Darwin_universal`/`Linux_x64_deb`/`Linux_x64_rpm`). Se algum pod
+   de AppServer for recriado antes do `webagent` (ex.: reinício simultâneo do zero) e vier
+   faltando chave, é a corrida sidecar-vs-core já conhecida (ADR 0014) — `kubectl rollout restart
+   deployment appserver-core appserver-rest appserver-telnet` resolve.
+
+**Não há item de backlog aberto conhecido neste momento** — os 4 itens do ciclo mais recente
+(`includes`, segurança/GPG, `webagent` incluindo multi-SO, auth do Image Updater) estão todos
+fechados e validados ao vivo (ver seção "Backlog aberto, por prioridade" abaixo — mantida com o
+histórico de cada item fechado, não porque algo ainda esteja pendente). Próxima sessão começa
+sem pendência herdada: definir com o usuário qual a próxima frente de trabalho (overlays do
+Kustomize? staging/produção? outro componente da stack?) antes de qualquer implementação.
 
 ## Histórico condensado da sessão de 2026-09-18, parte 3
 
