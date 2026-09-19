@@ -3,8 +3,8 @@
 ## Status
 Aceito, implementado e **validado com restore ao vivo** em 2026-09-19. O Velero estava instalado
 desde 2026-07-26 mas nunca tinha feito um backup e, mesmo que fizesse, não teria capturado dado
-algum. Um achado colateral (encoding do banco do cluster) ficou registrado como pendência, ver
-"Achado fora do escopo" no fim.
+algum. Um achado colateral (encoding do banco do cluster, UTF8 em vez de WIN1252) foi corrigido
+na mesma sessão, ver "Achado fora do escopo" no fim.
 
 ## Contexto
 Levantamento feito antes de mexer em qualquer coisa, e que mudou o escopo do que parecia ser
@@ -110,8 +110,20 @@ que o init da imagem `docker-postgres-protheus` cria (`ENCODING='WIN1252' LC_COL
 `LC_CTYPE='pt_BR.CP1252'`) — mas só **se o banco ainda não existir**. `base/postgres.env` define
 `POSTGRES_DB=protheus`/`POSTGRES_USER=protheus`, então o entrypoint oficial já cria o banco
 (UTF8, default) antes do init da imagem, que pula a criação. O Compose usa `POSTGRES_DB=postgres`
-e não sofre isso. Não corrigido nesta sessão: exige recriar o banco (ADR 0006: parar `core` e
-`dbaccess` antes) e mexer na convenção de 2026-09-16.
+e não sofre isso.
+
+**Corrigido na mesma sessão (2026-09-19), a pedido do usuário**: `base/postgres.env` passou a
+`POSTGRES_DB=postgres`/`POSTGRES_USER=postgres` (bootstrap, como no Compose; `DB_*` seguem
+`protheus`, e `dbaccess`/`appserver` logam por `DB_*`, então não foram afetados). Em vez de
+`DROP/CREATE DATABASE` no lugar — que deixaria o cluster inicializado com a config errada —, o
+Postgres foi **reinicializado do zero** pelos manifestos do cluster (sem resíduo de
+Compose/legado): `license`, `dbaccess` e `core`/`rest`/`telnet` pausados via git (ADR 0006), wipe
+do data dir feito pelo usuário (o classificador de segurança negou a remoção ao assistente), o
+container reiniciou sozinho e rodou `initdb` + init da imagem. Resultado medido: `protheus`
+`WIN1252 | collate=C | ctype=pt_BR.CP1252`, dono `protheus` (sem superuser), 0 tabelas.
+`license` e `dbaccess` religados; `core`/`rest`/`telnet` ficam parados até o bootstrap manual do
+`CLAUDE.md` (banco vazio). O hook de backup passou a dumpar só bancos que existem. A convenção de
+2026-09-16 vale para `DB_*` e `ENV_NAME`; o superusuário de bootstrap do Postgres é `postgres`.
 
 ## Consequências
 - O backup passa a existir, ser diário e ter sido restaurado de verdade.

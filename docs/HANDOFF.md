@@ -32,15 +32,25 @@ obstáculos e a receita de restore em `docs/adr/0015-backup-dr-velero.md`.
    18/09 e nunca recebeu `docker stop` manual, então `unless-stopped` o religou no boot). Ao
    encerrar uma sessão, conferir o `docker ps`, não basta ter rodado `docker compose stop`.
 
+**⚠️ GATE DO BOOTSTRAP MANUAL — LEIA ANTES DE SUBIR O `core`**: o banco `protheus` foi recriado
+**vazio** nesta sessão (0 tabelas). `core`/`rest`/`telnet` estão em `replicas: 0` de propósito;
+`license` e `dbaccess` estão no ar. Sequência obrigatória do `CLAUDE.md`: o usuário valida banco,
+dbaccess e dbaccess×banco, e só então sobe o `core` e define usuário/senha no SmartClient
+(`http://<host>:<CORE_PORT_MULTI>/`); UPDDISTR/worker/compile só depois. Ao voltar `core` pra
+`replicas: 1` (via git), avisar o usuário imediatamente.
+
+**Encoding do banco — corrigido nesta sessão** (ADR 0015): estava UTF8, o Protheus exige WIN1252.
+Causa: `POSTGRES_DB=protheus` em `base/postgres.env` fazia o entrypoint oficial criar o banco
+(UTF8) antes do init da imagem, que só cria em WIN1252 se ele não existir. Agora
+`POSTGRES_DB/USER=postgres` (como o Compose) e o Postgres foi reinicializado do zero: `protheus` é
+`WIN1252 | C | pt_BR.CP1252`. Os dados antigos (171 tabelas, bootstrap anterior) foram
+descartados por decisão do usuário; restam os backups `manual-2`/`pre-reinit` do Velero, mas são
+**UTF8** e não devem ser restaurados sobre o banco novo.
+
 **Pendências reais**:
 
-- **Encoding do banco do cluster está errado (UTF8, deveria ser WIN1252).** Achado ao restaurar o
-  dump num banco descartável: o init da imagem `docker-protheus-postgres` cria o banco com
-  `WIN1252`/`LC_COLLATE='C'`, mas só se ele ainda não existir; `base/postgres.env` define
-  `POSTGRES_DB=protheus`, então o entrypoint oficial cria o banco (UTF8) antes e o init pula. O
-  Compose usa `POSTGRES_DB=postgres` e não tem o problema. **Não corrigido**: exige recriar o
-  banco (ADR 0006: parar `core` e `dbaccess`, wipe, recriar, e passar pelo bootstrap manual do
-  `CLAUDE.md`) e reabre a convenção de 2026-09-16. Decidir com o usuário antes de agir.
+- Cópias de RPO de segurança e o resíduo `protheus-includes` foram removidos (o usuário rodou os
+  comandos; o classificador de segurança bloqueia `rm` destrutivo do assistente).
 - **Restore *real* sobre o cluster principal não foi exercitado** (só o drill em namespace
   descartável). Se algum dia precisar, o caminho é outro e vale um drill próprio.
 - Follow-up antigo do ADR 0013 segue aberto: `smartview-db-init` (`PreSync`) depende de
