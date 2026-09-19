@@ -17,7 +17,12 @@ spec:
   accessModes:
     - ReadWriteOnce
   persistentVolumeReclaimPolicy: Retain
-  hostPath:
+  # `local` e não `hostPath`: o Velero (File System Backup) não suporta
+  # hostPath, só local. A nodeAffinity abaixo é exigida pelo tipo local e já
+  # existia -- por isso a troca custou só esta chave. Este é o único volume
+  # cujo dado nenhuma imagem reconstrói (tttm120.rpo com patch, custom.rpo).
+  # Ver ADR 0015.
+  local:
     path: /media/rodrigo/dados/k8s-volume/protheus-apo
   nodeAffinity:
     required:
