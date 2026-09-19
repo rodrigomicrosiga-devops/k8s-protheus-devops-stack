@@ -637,21 +637,35 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
      `Linux_x64_rpm`), `.msi` entregue no volume mas de propósito fora do `.ini` (fluxo GPO
      separado, sem chave documentada). Validado ao vivo via Compose com imagens reais
      publicadas. **Propagação pro k8s bloqueada** por um achado novo — ver item 4 abaixo.
-4. **NOVO — `argocd-image-updater` sem autenticação no Docker Hub (achado em 2026-09-18,
-   fleet-wide, não específico do webagent)**: o controller faz pull anônimo do Docker Hub pra
-   resolver digest de TODAS as ~11 imagens rastreadas (`argocd/image-updater.yaml`), e está
-   sendo rate-limited (`toomanyrequests: You have reached your unauthenticated pull rate
-   limit`) há vários ciclos de poll seguidos. Efeito concreto observado: o override de digest em
-   `Application.spec.source.kustomize.images` ficou parado numa versão antiga do
-   `appserver-dev`/`webagent-dev`, e o `selfHeal` reverte qualquer `kubectl set image` manual de
-   volta pro valor cacheado (comportamento correto do Argo CD, só expõe o problema de raiz).
-   Sem risco pro cluster (segue `Synced`/`Healthy`, rodando a versão anterior, funcional) — mas
-   bloqueia a atualização automática de imagem até resolver. Correção recomendada: adicionar
-   credenciais do Docker Hub (mesmo par `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` já usado em toda
-   a frota via CI) em `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml`, seguindo
-   o formato de `registries`/secret de pull do chart `argocd-image-updater` — sintaxe exata do
-   chart ainda não pesquisada, fica pro próximo passo real. Precisa de credencial que só o
-   usuário tem/gera; não é algo que se resolve só com código.
+4. **`argocd-image-updater` sem autenticação no Docker Hub — lado do código fechado em
+   2026-09-18 (commit `fe6e83d`), falta só a ação manual do usuário**: o controller sempre fez
+   pull anônimo do Docker Hub pra resolver digest de TODAS as ~11 imagens rastreadas
+   (`argocd/image-updater.yaml`), e foi rate-limited (`toomanyrequests: You have reached your
+   unauthenticated pull rate limit`) sob o uso intenso desta sessão. Efeito concreto observado: o
+   override de digest em `Application.spec.source.kustomize.images` ficou parado numa versão
+   antiga do `appserver-dev`/`webagent-dev`, e o `selfHeal` reverte qualquer `kubectl set image`
+   manual de volta pro valor cacheado (comportamento correto do Argo CD, só expõe o problema de
+   raiz). Sem risco pro cluster (segue `Synced`/`Healthy`, rodando a versão anterior, funcional).
+   `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml` já referencia
+   `credentials: secret:argocd/dockerhub-creds#creds` (sintaxe confirmada via `helm show values
+   argo/argocd-image-updater` local, chart `argocd-image-updater-1.3.1`); `03-install-argocd.sh`
+   avisa se o Secret não existir antes do `helm upgrade`. **Pendente, ação do usuário** (não
+   automatizável de propósito — credencial não deve passar por script nem histórico de shell
+   compartilhável):
+   ```
+   kubectl create secret generic dockerhub-creds -n argocd \
+     --from-literal=creds='SEU_USUARIO_DOCKERHUB:SEU_ACCESS_TOKEN'
+   helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+     --namespace argocd -f scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml
+   ```
+   Usar Access Token do Docker Hub (Account Settings → Security → New Access Token, escopo
+   Read-only basta), nunca a senha da conta. Confirmado no cluster atual: Secret ainda não
+   existe (`kubectl get secret dockerhub-creds -n argocd` → `NotFound`), release
+   `argocd-image-updater` já instalado (revision 1) — precisa do `helm upgrade` acima pra pegar
+   o values novo, não sobe sozinho. Depois de rodar os dois comandos, verificar:
+   `kubectl logs -n argocd deployment/argocd-image-updater | grep -i docker.io` não deve mais
+   mostrar `toomanyrequests`, e os digests do webagent/appserver multi-SO (item 1 acima) devem
+   propagar sozinhos em poucos minutos.
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
