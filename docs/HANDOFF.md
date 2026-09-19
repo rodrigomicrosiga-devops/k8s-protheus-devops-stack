@@ -4,64 +4,80 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (fim da sessão de 2026-09-19 — backup/DR com Velero, restore validado)
+## Onde paramos (pausa em 2026-09-19 ~18:20 UTC — banco recriado em WIN1252, aguardando a validação do usuário)
 
-Frente escolhida com o usuário: backup/DR. O Velero estava inerte (nunca fez backup e, mesmo que
-fizesse, não capturaria dado). Agora há backup diário e um restore validado ao vivo. Decisões,
-obstáculos e a receita de restore em `docs/adr/0015-backup-dr-velero.md`.
+Sessão de 2026-09-19: (1) backup/DR com Velero fechado e restore validado por hash (ADR 0015);
+(2) achado e correção do encoding do banco (UTF8 → WIN1252) com **reinicialização do Postgres do
+zero**. O usuário pausou **no gate do bootstrap manual**: o próximo passo é dele.
 
-**Verificar ao retomar, antes de qualquer coisa nova**:
+### ⚠️ Estado exato ao pausar (conferido ao vivo)
+- Argo CD `Synced`/`Healthy`, commits em `origin/develop` (último `679af8a`), árvore limpa.
+- **Rodando**: `postgres`, `dbaccess`, `license` (`replicas: 1`) + seeds, webapp, printer, webagent,
+  smartview. **Parados de propósito (`replicas: 0` no git)**: `appserver-core`, `appserver-rest`,
+  `appserver-telnet`.
+- Banco `protheus`: `WIN1252 | collate=C | ctype=pt_BR.CP1252`, dono `protheus` (sem superuser),
+  **0 tabelas — base genuinamente nova**. `smartview_dev` recriado pelo hook.
+- Compose local: nenhum container `protheus_*` no ar. Unit `k3d-node-rshared.service`: `enabled`
+  (o usuário instalou). `Schedule protheus-daily`: `Enabled`, **sem nenhuma execução automática
+  ainda** (primeira às 21:00 UTC de 2026-09-19).
 
-1. **Cluster saudável?** `kubectl get applications -n argocd protheus-devops-stack` (`Synced`/
-   `Healthy`), 13 pods de `protheus-devops` `Running`, `node-exporter` 2/2 `Running`.
-2. **Unit systemd instalada?** Não foi instalada por esta sessão (é ação no host). Sem ela, todo
-   reboot derruba o `node-exporter` e o `node-agent` do Velero por propagação de mount:
-   ```
-   ! sudo install -m 0644 scripts/k3d-nodes/k3d-node-rshared.service /etc/systemd/system/
-   ! sudo systemctl daemon-reload && sudo systemctl enable --now k3d-node-rshared.service
-   ```
-   Enquanto não instalar: `scripts/k3d-nodes/post-boot.sh` à mão depois de cada boot.
-3. **O backup diário roda?** `kubectl get backups -n velero` deve mostrar `protheus-daily-*`
-   `Completed` a partir de 2026-09-19 21:00 UTC. **Comportamento ainda não verificado**: se a
-   máquina estiver desligada às 21:00 UTC, o Velero deve rodar o backup vencido ao voltar — confirme
-   no primeiro ciclo real (se não rodar, mudar o horário ou disparar à mão).
-   Lembrete: usar `kubectl get backup <nome> -o jsonpath='{.status.phase}'`; o
-   `velero backup describe` no host dá erro de DNS do MinIO que **não** é falha do backup.
-4. **Compose parado?** `docker ps --filter name=protheus_` deve vir vazio. Esta sessão religou o
-   `protheus_postgres` sem querer deixá-lo no ar (causa: foi ligado na validação do webagent de
-   18/09 e nunca recebeu `docker stop` manual, então `unless-stopped` o religou no boot). Ao
-   encerrar uma sessão, conferir o `docker ps`, não basta ter rodado `docker compose stop`.
+### 👉 Retomar daqui: validação e bootstrap manual (regra dura do `CLAUDE.md`)
+1. **Usuário valida** banco, `dbaccess` e `dbaccess`×banco (cada validação é dele, não substituível).
+2. Quando o usuário mandar subir o `core`: `replicas: 1` **só em `appserver-core.yaml`**, via
+   commit+push (nunca `kubectl scale`, o `selfHeal` reverte), e **avisar o usuário imediatamente**.
+   *Recomendação minha (não está no `CLAUDE.md`):* deixar `rest`/`telnet` em 0 até o passo 3 acabar,
+   pra não somar conexões ao banco vazio.
+3. Usuário abre o SmartClient (`http://<host>:<CORE_PORT_MULTI>/`) e define usuário/senha inicial.
+   Não deixar o `core` passar por vários ciclos de boot/restart antes disso.
+4. Só então o Protheus cria as `SYS_*` e `UPDDISTR`/`worker`/`compile` podem rodar
+   (`scripts/appserver-patch/run-job.sh`). Depois: `rest`/`telnet` de volta a `replicas: 1`.
+5. **Decisão em aberto do usuário**: a base nova não tem o dicionário que o `UPDDISTR` do pacote
+   `EXPEDICAO_CONTINUA` tinha aplicado (a antiga chegou a 54 tabelas `SYS_*`). Reaplicar ou não é
+   escolha dele. O RPO **não** foi tocado: `tttm120.rpo` (patch "onça pintada") e `custom.rpo`
+   seguem no volume `protheus-apo`.
+6. **Depois do bootstrap**, tirar um backup do estado novo:
+   `velero backup create pos-bootstrap --from-schedule protheus-daily --wait`
+   (os backups `manual-2`/`pre-reinit` são do banco antigo em **UTF8** — não restaurar sobre o novo).
 
-**⚠️ GATE DO BOOTSTRAP MANUAL — LEIA ANTES DE SUBIR O `core`**: o banco `protheus` foi recriado
-**vazio** nesta sessão (0 tabelas). `core`/`rest`/`telnet` estão em `replicas: 0` de propósito;
-`license` e `dbaccess` estão no ar. Sequência obrigatória do `CLAUDE.md`: o usuário valida banco,
-dbaccess e dbaccess×banco, e só então sobe o `core` e define usuário/senha no SmartClient
-(`http://<host>:<CORE_PORT_MULTI>/`); UPDDISTR/worker/compile só depois. Ao voltar `core` pra
-`replicas: 1` (via git), avisar o usuário imediatamente.
+### Verificações rápidas ao retomar
+- `kubectl get applications -n argocd protheus-devops-stack`; `kubectl get pods -n protheus-devops`;
+  `kubectl get pods -n monitoring` (node-exporter 2/2).
+- `kubectl exec deployment/postgres -n protheus-devops -- psql -U postgres -d postgres -tAc
+  "select datname, pg_encoding_to_char(encoding) from pg_database"` → `protheus` deve ser `WIN1252`.
+- **O backup diário rodou?** `kubectl get backups -n velero` → deve haver `protheus-daily-*`
+  `Completed`. **Não verificado**: se a máquina estiver desligada às 21:00 UTC, o Velero deve rodar
+  o backup vencido ao voltar. Se não rodou, disparar à mão ou mudar o horário. Usar
+  `kubectl get backup <n> -o jsonpath='{.status.phase}'` (o `velero backup describe` no host dá erro
+  de DNS do MinIO que **não** é falha do backup).
+- `docker ps --filter name=protheus_` deve vir vazio (ao encerrar sessão conferir o `docker ps`,
+  não basta `docker compose stop`: `unless-stopped` religa no boot o que nunca recebeu `docker stop`).
 
-**Encoding do banco — corrigido nesta sessão** (ADR 0015): estava UTF8, o Protheus exige WIN1252.
-Causa: `POSTGRES_DB=protheus` em `base/postgres.env` fazia o entrypoint oficial criar o banco
-(UTF8) antes do init da imagem, que só cria em WIN1252 se ele não existir. Agora
-`POSTGRES_DB/USER=postgres` (como o Compose) e o Postgres foi reinicializado do zero: `protheus` é
-`WIN1252 | C | pt_BR.CP1252`. Os dados antigos (171 tabelas, bootstrap anterior) foram
-descartados por decisão do usuário; restam os backups `manual-2`/`pre-reinit` do Velero, mas são
-**UTF8** e não devem ser restaurados sobre o banco novo.
-
-**Pendências reais**:
-
-- Cópias de RPO de segurança e o resíduo `protheus-includes` foram removidos (o usuário rodou os
-  comandos; o classificador de segurança bloqueia `rm` destrutivo do assistente).
+### Pendências reais / não verificado
 - **Restore *real* sobre o cluster principal não foi exercitado** (só o drill em namespace
-  descartável). Se algum dia precisar, o caminho é outro e vale um drill próprio.
+  descartável, ADR 0015). Vale um drill próprio se um dia precisar.
 - Follow-up antigo do ADR 0013 segue aberto: `smartview-db-init` (`PreSync`) depende de
   `postgres-secret` (recurso de `Sync`) e trava todo bootstrap do zero.
+- O log do `license` repete `licenseserver.ini (empty)` entre os avisos normais do License Server
+  Virtual; pod `Ready`, imagem inalterada (3.7.2). Não parece regressão, mas não foi comparado com o
+  pod anterior.
 
-**O que mudou no cluster nesta sessão**: `protheus-apo-pv` virou `local` (recriado pelo roteiro do
-ADR 0012, hashes do RPO idênticos antes/depois); novo `postgres-dumps-pv`/`-pvc` com hook de
-`pg_dump` no Postgres (1 rollout, sem `replicas: 0`); MinIO em `k8s-volume/minio-backup`;
-`node-agent` ligado; servidor do Velero de 256Mi para 1Gi; `Schedule protheus-daily`.
-Cópias de segurança do RPO, feitas antes de mexer, ficaram em
-`/media/rodrigo/dados/backups/{tttm120,custom}-pre-pv-local-20260919.rpo` (≈750MB; apagáveis).
+### O que mudou nesta sessão (detalhe em `docs/adr/0015-backup-dr-velero.md`)
+- **Backup/DR**: MinIO em `k8s-volume/minio-backup` (bind mount real, sobrevive a `k3d cluster
+  delete`); `node-agent` ligado; servidor do Velero de 256Mi→1Gi (foi `OOMKilled` no 1º backup);
+  `Schedule protheus-daily` (21:00 UTC, TTL 7d, namespaces `protheus-devops`+`argocd`);
+  `protheus-apo-pv` virou `local` (Velero não faz backup de `hostPath`); dump lógico do Postgres via
+  hook `pre.hook.backup.velero.io` (só dumpa bancos que existem). Restore validado por hash:
+  RPO e dumps idênticos.
+- **Rshared**: `scripts/k3d-nodes/post-boot.sh` + `k3d-node-rshared.service` (o fix se perdia em
+  reboot do host, derrubando `node-exporter`/`node-agent`; ADR 0013, acréscimo).
+- **Encoding**: `base/postgres.env` agora `POSTGRES_DB/USER=postgres` (**nunca voltar pra
+  `protheus`**: o entrypoint oficial cria o banco em UTF8 antes do init da imagem). Postgres
+  reinicializado do zero; `DB_*`/`ENV_NAME` seguem `protheus`.
+- **Limpeza**: RPOs de backup (~1,4 GB) e a pasta órfã `protheus-includes` removidos pelo usuário
+  (o classificador de segurança bloqueia `rm` destrutivo do assistente, mesmo com autorização: o
+  caminho é preparar o comando e pedir pro usuário rodar via `!`).
+- `bootstrap` (`00`/`04`) passou a preparar `postgres-dumps`, MinIO em bind mount, overlays de
+  values e o Schedule.
 
 **Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
 ou aqui, leia "o cluster de dev".
@@ -748,6 +764,8 @@ resolver o boot — executado e fechado na sessão seguinte (18/09, ver "Onde pa
 
 ## Regras operacionais já validadas (não reabrir sem motivo novo)
 
+- **`base/postgres.env`: `POSTGRES_DB`/`POSTGRES_USER` têm que ser `postgres`, nunca `protheus`.** O init da imagem (`docker-postgres-protheus`) só cria o banco em WIN1252 (exigência do Protheus) se ele ainda não existir; com `POSTGRES_DB=protheus` o entrypoint oficial o criava antes, em UTF8. `DB_USER`/`DB_NAME` seguem `protheus`. Achado e correção de 2026-09-19 (ADR 0015).
+- **O classificador de segurança bloqueia `rm`/wipe destrutivo do assistente mesmo com autorização explícita do usuário** — não contornar; preparar o comando exato e pedir pro usuário rodar via `!`. Pausar serviços via git (`replicas: 0`) e reinicializar o Postgres (o container se recupera sozinho depois de o data dir ser apagado, sem precisar de `replicas: 0` no próprio Postgres, o que evita a dependência circular do hook `PreSync`) continua sendo o caminho.
 - **Sequência de bootstrap manual do AppServer** — ver `CLAUDE.md`. É a regra mais cara do
   projeto: violá-la poluiu o banco com 17 tabelas indevidas (`env_*`/`sys_*`/`top_*`) em
   2026-07-30, exigindo wipe completo. Vale tanto para o Compose quanto pro cluster k8s.
