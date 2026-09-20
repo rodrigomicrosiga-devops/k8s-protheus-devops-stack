@@ -137,8 +137,15 @@ Antes do AppServer, os três seeds (`protheus-rpo-seed`, `protheus-system-seed`,
 kubectl get pods -n protheus-devops -l 'app in (protheus-rpo-seed,protheus-system-seed,protheus-systemload-seed,appserver-core,appserver-rest,appserver-telnet)'
 kubectl port-forward deployment/appserver-core 1234:1234 -n protheus-devops   # Multi-protocolo (SmartClient)
 kubectl port-forward deployment/appserver-rest 8400:8400 -n protheus-devops  # REST
-kubectl port-forward deployment/appserver-telnet 23:23 -n protheus-devops    # Telnet (monitor)
+kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops  # Telnet (monitor) -- 23 é privilegiada, usar outra porta local
 ```
+
+**Acesso ao console `SIGAACD` (telnet)**: clientes telnet genéricos — testado com PuTTY — não
+conseguem navegar o menu dele (navegação real é digitar o número da posição do item, não seta;
+o servidor também não negocia eco, então esses clientes duplicam visualmente cada tecla). Use
+[`scripts/sigaacd-client/sigaacd_client.py`](scripts/sigaacd-client/sigaacd_client.py) em vez
+disso — detalhe completo do porquê em
+[`scripts/sigaacd-client/README.md`](scripts/sigaacd-client/README.md).
 
 **Regra mais cara do projeto** (ver [`CLAUDE.md`](CLAUDE.md)): numa base genuinamente nova, `UPDDISTR`/`worker`/`compile` nunca rodam antes do usuário concluir o bootstrap manual (login inicial via SmartClient). Vale tanto para o Compose quanto para este cluster.
 
@@ -210,6 +217,9 @@ Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 001
 - [`scripts/k3d-nodes/`](scripts/k3d-nodes/) — receita versionada para recriar o *container* de um node k3d já existente (`agent-0`/`server-0`) preservando os volumes nomeados e o bind mount real. Não recria o cluster do zero (rede + volumes novos) — ver item 3 do backlog em `docs/HANDOFF.md`.
 - [`scripts/k3d-nodes/post-boot.sh`](scripts/k3d-nodes/post-boot.sh) + [`k3d-node-rshared.service`](scripts/k3d-nodes/k3d-node-rshared.service) — reaplica a propagação de mount `rshared` nos nodes a cada boot do host (sem isso o `node-exporter` e o `node-agent` do Velero quebram).
 - [`scripts/appserver-patch/`](scripts/appserver-patch/) — `run-job.sh worker|compile|upddistr`, ver seção 7 acima.
+- [`scripts/sigaacd-client/`](scripts/sigaacd-client/) — cliente telnet mínimo pro console
+  `SIGAACD`; clientes genéricos (PuTTY) não navegam o menu dele — ver seção 6 acima e o README do
+  próprio diretório para o diagnóstico completo.
 - [`docs/prompts/`](docs/prompts/) — prompts reutilizáveis para atualizar versão de binário TOTVS num repo `docker-protheus-*` e sincronizar as tags resultantes no `docker-compose.yaml` do repo irmão `docker-protheus-devops-stack`.
 
 
