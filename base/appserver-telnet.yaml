@@ -54,6 +54,16 @@ spec:
               value: "custom"
             - name: TELNET_PORT
               value: "23"
+            # Experimento: a imagem só tem locale pt_BR.UTF-8 (sem
+            # WIN1252/ISO-8859-1 gerado), e o console SIGAACD via telnet
+            # come os acentos (ç/ã) na tela de login -- suspeita de que o
+            # app confunde dado single-byte WIN1252 com locale UTF-8. C
+            # (byte-transparente, sem interpretação de charset) é o teste
+            # mais barato antes de mexer na imagem. Reverter se não ajudar.
+            - name: LANG
+              value: "C"
+            - name: LC_ALL
+              value: "C"
           envFrom:
             - configMapRef:
                 name: postgres-config
