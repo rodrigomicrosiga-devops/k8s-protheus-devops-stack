@@ -143,9 +143,9 @@ kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops  # T
 **Acesso ao console `SIGAACD` (telnet)**: clientes telnet genéricos — testado com PuTTY — não
 conseguem navegar o menu dele (navegação real é digitar o número da posição do item, não seta;
 o servidor também não negocia eco, então esses clientes duplicam visualmente cada tecla). Use
-[`scripts/sigaacd-client/sigaacd_client.py`](scripts/sigaacd-client/sigaacd_client.py) em vez
-disso — detalhe completo do porquê em
-[`scripts/sigaacd-client/README.md`](scripts/sigaacd-client/README.md).
+[`scripts/sigaacd-client/python/sigaacd_client.py`](scripts/sigaacd-client/python/sigaacd_client.py)
+ou o equivalente em Go, [`scripts/sigaacd-client/go/`](scripts/sigaacd-client/go/), em vez disso —
+detalhe completo do porquê em [`scripts/sigaacd-client/README.md`](scripts/sigaacd-client/README.md).
 
 **Regra mais cara do projeto** (ver [`CLAUDE.md`](CLAUDE.md)): numa base genuinamente nova, `UPDDISTR`/`worker`/`compile` nunca rodam antes do usuário concluir o bootstrap manual (login inicial via SmartClient). Vale tanto para o Compose quanto para este cluster.
 
@@ -218,8 +218,8 @@ Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 001
 - [`scripts/k3d-nodes/post-boot.sh`](scripts/k3d-nodes/post-boot.sh) + [`k3d-node-rshared.service`](scripts/k3d-nodes/k3d-node-rshared.service) — reaplica a propagação de mount `rshared` nos nodes a cada boot do host (sem isso o `node-exporter` e o `node-agent` do Velero quebram).
 - [`scripts/appserver-patch/`](scripts/appserver-patch/) — `run-job.sh worker|compile|upddistr`, ver seção 7 acima.
 - [`scripts/sigaacd-client/`](scripts/sigaacd-client/) — cliente telnet mínimo pro console
-  `SIGAACD`; clientes genéricos (PuTTY) não navegam o menu dele — ver seção 6 acima e o README do
-  próprio diretório para o diagnóstico completo.
+  `SIGAACD` (versões em Python e Go); clientes genéricos (PuTTY) não navegam o menu dele — ver
+  seção 6 acima e o README do próprio diretório para o diagnóstico completo.
 - [`docs/prompts/`](docs/prompts/) — prompts reutilizáveis para atualizar versão de binário TOTVS num repo `docker-protheus-*` e sincronizar as tags resultantes no `docker-compose.yaml` do repo irmão `docker-protheus-devops-stack`.
 
 

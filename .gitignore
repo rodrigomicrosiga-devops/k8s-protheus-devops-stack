@@ -14,3 +14,7 @@ scripts/cluster-bootstrap/helm-values/*.yaml
 !scripts/cluster-bootstrap/helm-values/sealed-secrets.yaml
 !scripts/cluster-bootstrap/helm-values/minio-persistence.yaml
 !scripts/cluster-bootstrap/helm-values/velero-overrides.yaml
+
+# Binario compilado do cliente Go do SIGAACD -- gerado localmente via
+# `go build`, nunca versionado (só o código-fonte).
+scripts/sigaacd-client/go/sigaacd-client

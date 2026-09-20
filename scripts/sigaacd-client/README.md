@@ -2,9 +2,10 @@
 
 O `SIGAACD` é o console de administração do AppServer acessível via `appserver-telnet`
 (`base/appserver-telnet.yaml`, porta `23`/`1236`). Clientes telnet genéricos — testado com
-**PuTTY 0.81** — não conseguem navegar o menu dele. `sigaacd_client.py` é um cliente mínimo,
-escrito especificamente pra contornar os dois problemas reais encontrados (não é achismo —
-diagnosticado ao vivo com captura de bytes crus, ver "Como foi descoberto" abaixo).
+**PuTTY 0.81** — não conseguem navegar o menu dele. Duas implementações equivalentes deste
+diretório contornam isso — [`python/`](python/) (a original, usada pro diagnóstico) e
+[`go/`](go/) (binário único, sem depender de `python3` instalado). Mesma lógica, mesmo protocolo,
+escolha a que for mais conveniente.
 
 ## Por que o PuTTY (e provavelmente qualquer terminal padrão) não funciona
 
@@ -21,29 +22,45 @@ diagnosticado ao vivo com captura de bytes crus, ver "Como foi descoberto" abaix
    impressão de que "só imprime o número na tela" (nada navega), quando na verdade o servidor já
    processou o comando corretamente por baixo — só a visualização que fica poluída.
 
-## O que este script faz diferente
+## O que os dois clientes fazem diferente
 
-- **Não faz eco local nenhum**: o terminal do usuário entra em modo raw (`tty.setraw`), cada tecla
-  vai direto pro socket, sem processamento.
-- **Não traduz nada**: os códigos ANSI que o próprio `SIGAACD` manda (posicionamento de cursor
+- **Não fazem eco local nenhum**: o terminal do usuário entra em modo raw (`tty.setraw` em
+  Python, `golang.org/x/term.MakeRaw` em Go), cada tecla vai direto pro socket, sem processamento.
+- **Não traduzem nada**: os códigos ANSI que o próprio `SIGAACD` manda (posicionamento de cursor
   `ESC[lin;colf`, vídeo reverso `ESC[7m`) são escritos direto no stdout — o terminal real do
   usuário (qualquer emulador ANSI padrão) já sabe desenhar isso sozinho.
-- **Responde a negociação IAC** do telnet (`DO`/`WILL`/`SB`) automaticamente, incluindo
-  `TERMINAL-TYPE` (responde `VT100` se o servidor pedir via subnegociação).
+- **Respondem a negociação IAC** do telnet (`DO`/`WILL`/`SB`) automaticamente, incluindo
+  `TERMINAL-TYPE` (respondem `VT100` se o servidor pedir via subnegociação).
 
 ## Uso
 
+Primeiro, em qualquer um dos dois, o `port-forward` precisa estar de pé:
+
 ```bash
 kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
-python3 scripts/sigaacd-client/sigaacd_client.py            # default 127.0.0.1:2323
-python3 scripts/sigaacd-client/sigaacd_client.py <host> <porta>   # outro endereço
 ```
 
-Dentro do SIGAACD: número da posição do item + `ENTER` abre; `ESC` aborta/sai da tela atual.
-Pra sair do **cliente** (não do SIGAACD): `Ctrl+]`.
+**Python** (precisa só de `python3`, nada além da stdlib):
+
+```bash
+python3 scripts/sigaacd-client/python/sigaacd_client.py            # default 127.0.0.1:2323
+python3 scripts/sigaacd-client/python/sigaacd_client.py <host> <porta>
+```
+
+**Go** (precisa do toolchain Go só pra compilar; o binário resultante não depende de nada):
+
+```bash
+cd scripts/sigaacd-client/go
+go build -o sigaacd-client .
+./sigaacd-client              # default 127.0.0.1:2323
+./sigaacd-client <host> <porta>
+```
+
+Dentro do SIGAACD (nos dois clientes): número da posição do item + `ENTER` abre; `ESC` aborta/sai
+da tela atual. Pra sair do **cliente** (não do SIGAACD): `Ctrl+]`.
 
 **Precisa de terminal de verdade** — roda num terminal interativo local (não faz sentido via
-pipe/redirecionamento), o `tty.setraw` exige um TTY real em `stdin`.
+pipe/redirecionamento), o modo raw exige um TTY real em `stdin`.
 
 ## Como foi descoberto
 
@@ -54,4 +71,6 @@ servidor respondeu com a tela "Abortado pelo operador", confirmando que `ESC` so
 de cancelar; digitar `2` no menu raiz (com o menu já assentado, sem nenhum envio pendente) moveu
 o destaque de `Atualizações` (item 1) pra `Consulta` (item 2), confirmado no byte de vídeo
 reverso (`\x1b[7m`) migrando de linha — sem envolver eco nenhum, já que a captura é só do que o
-servidor manda, nunca do que o cliente "imprime" localmente.
+servidor manda, nunca do que o cliente "imprime" localmente. Os dois clientes (Python e Go, esse
+último implementado depois) foram validados ao vivo com o mesmo teste — login, navegação por
+número e saída via `Ctrl+]`.
