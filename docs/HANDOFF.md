@@ -4,7 +4,85 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-20 ~20:15 UTC — bootstrap manual concluído com sucesso)
+## Onde paramos (2026-09-20 ~21:50 UTC — cliente SIGAACD criado, achado de encoding aceito como limitação)
+
+Sessão de continuação, depois do bootstrap manual (ver histórico logo abaixo). Objetivo virou
+validar o console `SIGAACD` via telnet (`appserver-telnet`) — o PuTTY (único cliente telnet do
+usuário) não conseguia navegar o menu. Investigado a fundo, causa raiz real encontrada, e dois
+clientes próprios criados e validados ao vivo. **Nenhuma mudança de infra ficou pendente** — o
+único experimento de manifesto (`LANG=C` no `appserver-telnet`) foi testado e revertido.
+
+### Estado exato ao pausar (conferido ao vivo)
+- Argo CD `Synced`/`Healthy`, commits em `origin/develop` (último `e248c99`), árvore limpa.
+- 13 pods `1/1 Running`. Banco `protheus`: `WIN1252`, **167 tabelas** (subiu de 166 pra 167
+  durante a sessão — não investigado o porquê, provavelmente uma tabela criada ao abrir alguma
+  rotina do SIGAACD durante os testes de navegação; não parece problema).
+- **PuTTY foi desinstalado pelo usuário** — não é mais uma ferramenta disponível neste host pra
+  telnet. Use os clientes novos (abaixo).
+- 6 `kubectl port-forward` ativos em background desta sessão (`5433→postgres`, `7891→dbaccess`,
+  `8020→license`, `1234→appserver-core`, `8400→appserver-rest`, `2323→appserver-telnet`) —
+  **são processos da sessão do terminal, não sobrevivem a reboot nem a troca de sessão**, e
+  morrem sempre que o pod alvo é recriado. Religar sob demanda, comando padrão:
+  `kubectl port-forward deployment/<nome> <porta-local>:<porta-remota> -n protheus-devops &`.
+
+### Novidade: `scripts/sigaacd-client/` — cliente telnet próprio pro SIGAACD
+Criado porque nenhum cliente telnet genérico (testado: PuTTY 0.81) consegue navegar o menu do
+`SIGAACD`. Duas implementações equivalentes, escolha qualquer uma:
+- `scripts/sigaacd-client/python/sigaacd_client.py` — só stdlib, precisa de `python3`.
+- `scripts/sigaacd-client/go/` — compila um binário único (`go build -o sigaacd-client .`), sem
+  dependência de runtime.
+
+Achados reais que motivaram o cliente (detalhe completo, incluindo como foi diagnosticado, em
+`scripts/sigaacd-client/README.md`):
+1. **Navegação não é por seta** — o `SIGAACD` é DOS/Clipper/Harbour genuíno, não reconhece
+   nenhuma sequência VT100/ANSI de teclado. `ESC` sozinho é lido como **abortar/sair**. A
+   navegação real é **digitar o número da posição do item** (`1`, `2`, `3`...) + `ENTER` pra
+   abrir o destacado.
+2. **O servidor nunca negocia a opção telnet `ECHO`** — clientes com eco local automático (PuTTY
+   em modo "Auto") duplicam visualmente cada tecla, mascarando que a navegação já funciona por
+   baixo (parecia "só imprimir o número na tela").
+
+Os dois clientes não fazem eco local (terminal em modo raw) e não traduzem os códigos ANSI que o
+próprio `SIGAACD` manda — só repassam pro terminal real do usuário. Validados ao vivo: login,
+navegação por número, abertura de rotina, saída limpa via `Ctrl+]` — os dois, idêntico
+comportamento.
+
+### Achado sem correção: acentos comidos no título da tela de login do SIGAACD
+`TOTVS Construção e Projetos POSTGRES Protheus` chega como `TOTVS Constru  o e Pojetos POSTGRES
+Proteus` — `ç`/`ã` viram espaço, letras ASCII puras (`r`, `h`) somem sem deixar rastro. Investigado
+a fundo (bytes corrompidos desde a captura mais crua possível, sem cliente nenhum envolvido;
+`LANG=C` testado ao vivo no `appserver-telnet` e revertido, zero efeito; `CP1252.so` confirmado
+presente no container; chave `Environment=` do `[TELNET]` confirmada sem relação com charset via
+doc oficial TOTVS). Conclusão: bug interno do binário `appsrvlinux` (proprietário, sem acesso a
+fonte) — fora do alcance de infra/k8s/cliente telnet. **Não bloqueia uso real** (login, navegação
+e abertura de rotinas funcionam) — aceito como limitação conhecida, documentado em
+`scripts/sigaacd-client/README.md`, sem pendência de correção.
+
+### Pendências reais / não verificado (carregadas de sessões anteriores, ainda abertas)
+- **Decisão em aberto do usuário**: reaplicar ou não o `UPDDISTR` do pacote `EXPEDICAO_CONTINUA`
+  que a base antiga tinha (a atual, 167 tabelas, já é o dicionário padrão completo — não
+  comparável 1:1 com a contagem antiga). RPO não foi tocado.
+- `fiscal.zip` do `protheus-system-seed` não pode ser reextraído por cima do conteúdo existente
+  (dono uid 1000 vs container uid 100). Não bloqueia nada hoje.
+- **Restore *real* sobre o cluster principal não foi exercitado** (só o drill em namespace
+  descartável, ADR 0015).
+- Follow-up antigo do ADR 0013 segue aberto: `smartview-db-init` (`PreSync`) depende de
+  `postgres-secret` (recurso de `Sync`) e trava todo bootstrap do zero.
+- `UPDDISTR`/`worker`/`compile` (`scripts/appserver-patch/run-job.sh`) podem rodar (gate do
+  `CLAUDE.md` vencido) — ainda não executados nesta base nova.
+
+### Verificações rápidas ao retomar
+- `kubectl get applications -n argocd protheus-devops-stack`; `kubectl get pods -n protheus-devops`
+  (13 pods `1/1`).
+- Se for usar o `SIGAACD`: religar o `port-forward` de telnet
+  (`kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &`) e usar
+  `scripts/sigaacd-client/` — **não tem mais PuTTY neste host**.
+- `docker ps --filter name=protheus_` deve vir vazio.
+
+**Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
+ou aqui, leia "o cluster de dev".
+
+## Histórico condensado da sessão de 2026-09-20 — bootstrap manual concluído
 
 Sessão que atravessou o gate do bootstrap manual (regra dura do `CLAUDE.md`) que tinha pausado em
 2026-09-19. **Duas tentativas de login falharam antes da terceira dar certo** — ambas com causas
