@@ -62,6 +62,34 @@ da tela atual. Pra sair do **cliente** (não do SIGAACD): `Ctrl+]`.
 **Precisa de terminal de verdade** — roda num terminal interativo local (não faz sentido via
 pipe/redirecionamento), o modo raw exige um TTY real em `stdin`.
 
+## Limitação conhecida: caracteres acentuados comidos no título da tela de login
+
+A linha de título da tela de login (`TOTVS Construção e Projetos POSTGRES Protheus`) chega
+truncada — `TOTVS Constru  o e Pojetos POSTGRES Proteus`: `ç`/`ã` viram espaço em branco, e as
+letras `r` (de "Projetos") e `h` (de "Protheus") somem por completo, sem nem virar espaço.
+
+**Investigado a fundo, não é bug dos clientes deste diretório nem de configuração do cluster**:
+
+- Os bytes já chegam corrompidos assim na captura mais crua possível (socket direto, sem
+  nenhum cliente envolvido) — Python e Go só reproduzem fielmente o que recebem.
+- `LANG`/`LC_ALL=C` testado ao vivo no `appserver-telnet` (commit + redeploy + reteste): zero
+  efeito nos bytes recebidos. Revertido.
+- O módulo de conversão `CP1252.so` está presente em `/usr/lib/x86_64-linux-gnu/gconv/` dentro
+  do container — não é ausência de suporte a codepage no SO.
+- A chave `Environment=` da seção `[TELNET]` do `appserver.ini` é só o nome do ambiente
+  multi-DB (documentação oficial TOTVS), sem relação com charset/encoding.
+- Nenhum relato equivalente encontrado em documentação oficial (TDN) ou fóruns TOTVS/ADVPL.
+
+**Hipótese mais provável** (não confirmável sem acesso ao código-fonte do `appsrvlinux`, binário
+proprietário): o título provavelmente é montado concatenando um campo de descrição da empresa
+demo gravado em UTF-8 com uma rotina de exibição de largura fixa que conta bytes como se fossem
+caracteres — cada acento UTF-8 de 2 bytes (`ç`, `ã`) desalinha o resto do buffer, explicando tanto
+os espaços em branco quanto letras ASCII puras somem mais adiante na mesma linha.
+
+**Não bloqueia o uso real do console** — login, navegação por número e abertura de rotinas
+funcionam normalmente; é só a linha de título da tela de login que fica cosmeticamente
+incompleta. Aceito como limitação conhecida, sem correção de infraestrutura pendente.
+
 ## Como foi descoberto
 
 Diagnosticado com um script Python à parte (não versionado — era só instrumentação de uma vez),
