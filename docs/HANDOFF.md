@@ -4,7 +4,63 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-20 ~21:50 UTC — cliente SIGAACD criado, achado de encoding aceito como limitação)
+## Onde paramos (2026-09-21 ~15:15 UTC — follow-up do ADR 0013 fechado: hook smartview-db-init corrigido e validado ao vivo)
+
+Sessão de continuação. Único item de manifesto conhecido em aberto (ADR 0013, achado 1):
+`smartview-db-init-job` rodava como hook `PreSync` dependendo de `postgres-secret`, um
+`SealedSecret` de fase `Sync` — trava qualquer bootstrap genuinamente do zero. Corrigido e
+**validado com sync real via Argo CD, duas vezes seguidas** (não só render local). Detalhe
+completo, achados e evidências em `docs/adr/0016-ordenacao-por-sync-waves-em-vez-de-hook-em-secret.md`.
+
+### O que mudou
+- `smartview-db-init-job` saiu de hook `PreSync` para hook `Sync`/`sync-wave: "1"` — os secrets
+  que ele consome (`postgres-secret`, `smartview-secret`, `postgres-config`) ficam na wave 0
+  normal, o Deployment `smartview` foi pra wave 2. `smartview-secret.sealed.yaml` perdeu as
+  anotações de hook que tinha ganho em 20/09 (eram elas próprias defeituosas — ver achado abaixo).
+- SQL do Job reescrito: `ON_ERROR_STOP=1` em toda chamada do `psql` (antes um erro no meio do
+  arquivo saía com exit 0, mascarando falha), GRANTs movidos pra dentro de bloco `DO` (antes
+  `EXECUTE format()` rodava solto, inválido), `\c postgres` removido, `POSTGRES_USER`/`POSTGRES_DB`
+  trocados de literais desatualizados (`protheus`) pra `envFrom: postgres-config` (`postgres`,
+  correto desde o ADR 0015 — e só o superusuário consegue `CREATE USER` de verdade).
+- **Achado real só descoberto ao aplicar de verdade** (não estava na investigação inicial): o
+  primeiro sync com a correção acima ainda falhou, 8 vezes seguidas, `syntax error` bem no
+  `DO $$` que ninguém tinha tocado. Causa: `/bin/sh` desta imagem é `dash`, que tem um bug real de
+  parsing de heredoc — mesmo citado (`<<'SQL'`), engole um dos dois `$` do par `$$` adjacente.
+  Confirmado via `od -c` no arquivo gerado dentro do container. Corrigido trocando `$$` anônimo
+  por tag nomeada `$body$` nos dois blocos `DO`. Registrado no ADR 0016 como risco pra qualquer
+  script deste repo que gere SQL/config via heredoc num container Alpine.
+
+### Validação ao vivo (não só render)
+Dois syncs reais via `argocd`/`kubectl patch` no `Application`, ambos `Synced`/`Succeeded` na
+primeira tentativa depois da correção do `dash`:
+- `syncResult.resources` confirma o Job com `hookType: Sync` (não mais `PreSync`) e os secrets
+  sem `hookType` nenhum.
+- `datacl` de `postgres` saiu de `NULL` pra `{...,protheus=c/postgres}` — prova de que os GRANTs
+  finalmente aplicam de verdade, e continuou **idêntico** no segundo sync (idempotência do
+  ADR 0003 se sustentou, sem duplicar).
+- `creationTimestamp` dos 4 `SealedSecret`/`Secret` **inalterado** nos dois syncs — confirma que
+  nenhum é mais deletado/recriado por sync (o defeito que o achado 1 do ADR 0016 documentou).
+- 13 pods `1/1 Running`, sem restart novo em nenhum; 167 tabelas intactas.
+- Limpeza pós-depuração: dois artefatos de teste (`testuser999`/`testdb999`) criados durante a
+  investigação manual foram removidos do banco antes de considerar a sessão fechada.
+
+### Limite honesto desta validação
+Não prova o cenário exato que originou o achado 1 do ADR 0013 (`postgres-secret` inexistente,
+bootstrap genuinamente do zero) — só é exercitado com `k3d cluster delete` de verdade. Fica pra
+próxima vez que esse drill for repetido.
+
+### Verificações rápidas ao retomar
+- `kubectl get applications -n argocd protheus-devops-stack` → `Synced`/`Healthy`.
+- `kubectl get pods -n protheus-devops` → 13 pods `1/1` (o `smartview-db-init` não aparece mais
+  depois de um sync bem-sucedido — `hook-delete-policy: HookSucceeded` o remove sozinho).
+- `kubectl exec deployment/postgres -n protheus-devops -- psql -U postgres -d protheus -tAc
+  "select count(*) from information_schema.tables where table_schema='public'"` → `167`.
+- `docker ps --filter name=protheus_` deve vir vazio.
+
+**Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
+ou aqui, leia "o cluster de dev".
+
+## Histórico condensado da sessão de 2026-09-20 (cliente SIGAACD)
 
 Sessão de continuação, depois do bootstrap manual (ver histórico logo abaixo). Objetivo virou
 validar o console `SIGAACD` via telnet (`appserver-telnet`) — o PuTTY (único cliente telnet do
@@ -66,8 +122,9 @@ e abertura de rotinas funcionam) — aceito como limitação conhecida, document
   (dono uid 1000 vs container uid 100). Não bloqueia nada hoje.
 - **Restore *real* sobre o cluster principal não foi exercitado** (só o drill em namespace
   descartável, ADR 0015).
-- Follow-up antigo do ADR 0013 segue aberto: `smartview-db-init` (`PreSync`) depende de
-  `postgres-secret` (recurso de `Sync`) e trava todo bootstrap do zero.
+- ~~Follow-up antigo do ADR 0013: `smartview-db-init` (`PreSync`) depende de `postgres-secret`
+  (recurso de `Sync`) e trava todo bootstrap do zero.~~ **Resolvido em 2026-09-21**, ver "Onde
+  paramos" no topo e ADR 0016.
 - `UPDDISTR`/`worker`/`compile` (`scripts/appserver-patch/run-job.sh`) podem rodar (gate do
   `CLAUDE.md` vencido) — ainda não executados nesta base nova.
 
