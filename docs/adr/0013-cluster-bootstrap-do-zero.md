@@ -74,6 +74,11 @@ uma seção de validação, não só a decisão em teoria):
    possivelmente `postgres-config`) pra dentro do próprio hook `PreSync` do `smartview-db-init`
    como dependência declarada, ou remover a dependência do hook em `postgres-secret` — não
    corrigido nesta sessão, seria mudança de manifesto fora do escopo do drill de validação.
+   **Resolvido em 2026-09-21** (ADR 0016): `postgres-secret` nunca virou hook — o
+   `smartview-db-init-job` que saiu de `PreSync`, passando a hook `Sync`/wave 1 (depois de
+   `postgres-secret`/`postgres-config`, que ficam na wave 0 normal). A prova de que essa
+   correção resolve o cenário genuinamente do zero (sem nenhum Secret pré-existente) ainda
+   depende de repetir este drill — não foi reexecutada na sessão que corrigiu o manifesto.
 2. **Nodes recriados nascem com o mount raiz em propagação `private`, não `shared`** —
    quebra o `prometheus-node-exporter` (monta `/` do node, exige `shared`/`slave`,
    erro: `"path / is mounted on / but it is not a shared or slave mount"`). Não é algo visível

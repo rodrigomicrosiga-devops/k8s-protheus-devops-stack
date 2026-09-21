@@ -1,25 +1,27 @@
 # Job de bootstrap do banco do SmartView (equivalente ao serviço smartview_db_init
-# do docker-compose original, ramo "postgres" do init-smartview.sh). Roda uma vez
-# via hook PreSync do Argo CD -- não é um recurso pra ficar reconciliado
-# continuamente, e se autolimpa após concluir com sucesso.
-#
-# O SQL vai embutido direto no script (heredoc) em vez de vir de um ConfigMap:
-# hooks PreSync rodam ANTES da fase de Sync principal, que é quando ConfigMaps
-# "normais" (não-hook) seriam criados -- um ConfigMap separado geraria um
-# deadlock (o Job nunca veria o recurso existir). Pelo mesmo motivo,
-# POSTGRES_USER/POSTGRES_DB/SV_USER/SV_DBNAME vão como valor literal (mesmos
-# valores de base/postgres.env) em vez de via configMapRef -- o ConfigMap
-# postgres-config também só existe a partir da fase Sync.
+# do docker-compose original, ramo "postgres" do init-smartview.sh). Roda como hook
+# de fase Sync, wave 1 -- não PreSync -- justamente para poder depender de
+# postgres-secret/smartview-secret/postgres-config, que são recursos normais de
+# Sync (wave 0). Fazer o inverso (promover esses recursos a hook PreSync) foi
+# tentado antes só pro smartview-secret e rejeitado: sem hook-delete-policy,
+# Argo CD assume BeforeHookCreation e deleta+recria o SealedSecret (e o Secret
+# junto, por ownerReferences) a cada sync -- medido ao vivo em 2026-09-20/21,
+# ver docs/adr/0016. O Deployment smartview (base/smartview.yaml) vai na wave 2,
+# depois deste Job já ter criado o banco/usuário dele.
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: smartview-db-init
   namespace: protheus-devops
   annotations:
-    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
     argocd.argoproj.io/hook-delete-policy: HookSucceeded
 spec:
   backoffLimit: 3
+  # O script tem um "until psql ...; do sleep 2; done" sem timeout próprio --
+  # sem isso, um Postgres que nunca fica pronto trava o Job (e o sync) pra sempre.
+  activeDeadlineSeconds: 300
   template:
     spec:
       restartPolicy: Never
@@ -41,25 +43,37 @@ spec:
               SELECT 'CREATE DATABASE ' || current_setting('custom.sv_dbname') || ' WITH OWNER=' || current_setting('custom.sv_user') || ' ENCODING=''UTF8'''
               WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = current_setting('custom.sv_dbname')) \gexec
 
-              \c postgres
-              EXECUTE format('GRANT CONNECT ON DATABASE postgres TO %I', current_setting('custom.sv_user'));
-              EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', current_setting('custom.sv_user'));
-              EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', current_setting('custom.sv_user'));
+              -- GRANTs no-op enquanto SV_USER == POSTGRES_USER (o role já é dono
+              -- do banco por CREATE DATABASE ... OWNER=); existem pro caso de um
+              -- dia divergirem. EXECUTE só é válido dentro de um bloco DO/PL-pgSQL
+              -- -- rodar solto (como antes) dava "prepared statement does not
+              -- exist" e, sem ON_ERROR_STOP, o psql saía com exit 0 mesmo assim.
+              DO $$
+              BEGIN
+                EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), current_setting('custom.sv_user'));
+                EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', current_setting('custom.sv_user'));
+                EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', current_setting('custom.sv_user'));
+              END $$;
               SQL
               echo "Aguardando o Postgres do cluster ficar disponivel..."
-              until psql -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" > /dev/null 2>&1; do
+              until psql -v ON_ERROR_STOP=1 -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" > /dev/null 2>&1; do
                 sleep 2
               done
               echo "Provisionando banco/usuario do SmartView..."
-              psql -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+              psql -v ON_ERROR_STOP=1 -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
                 -c "SET custom.sv_user = '$SV_USER'; SET custom.sv_pass = '$SV_PASS'; SET custom.sv_dbname = '$SV_DBNAME';" \
                 -f /tmp/init-smartview.sql
               echo "SmartView provisionado com sucesso."
+          # POSTGRES_USER/POSTGRES_DB vêm do ConfigMap (não mais literais) --
+          # agora que o Job é wave 1 de Sync, postgres-config já existe (era
+          # PreSync que obrigava literal, ver docs/adr/0003). Conectar como o
+          # superusuário do ConfigMap (postgres, não protheus) importa de
+          # verdade: o role protheus é rolcreaterole=false, então o CREATE USER
+          # acima nunca funcionaria de fato conectado como ele.
+          envFrom:
+            - configMapRef:
+                name: postgres-config
           env:
-            - name: POSTGRES_USER
-              value: protheus
-            - name: POSTGRES_DB
-              value: protheus
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

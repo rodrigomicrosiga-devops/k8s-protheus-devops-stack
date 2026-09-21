@@ -3,6 +3,10 @@ kind: Deployment
 metadata:
   name: smartview
   namespace: protheus-devops
+  annotations:
+    # Wave 2: depois do smartview-db-init-job (wave 1), que cria o
+    # banco/usuário do SmartView no Postgres antes deste Deployment subir.
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   replicas: 1
   strategy:
