@@ -33,12 +33,12 @@ spec:
             - |
               set -e
               cat <<'SQL' > /tmp/init-smartview.sql
-              DO $$
+              DO $body$
               BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_setting('custom.sv_user', true)) THEN
                   EXECUTE format('CREATE USER %I WITH LOGIN ENCRYPTED PASSWORD %L', current_setting('custom.sv_user'), current_setting('custom.sv_pass'));
                 END IF;
-              END $$;
+              END $body$;
 
               SELECT 'CREATE DATABASE ' || current_setting('custom.sv_dbname') || ' WITH OWNER=' || current_setting('custom.sv_user') || ' ENCODING=''UTF8'''
               WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = current_setting('custom.sv_dbname')) \gexec
@@ -48,12 +48,18 @@ spec:
               -- dia divergirem. EXECUTE só é válido dentro de um bloco DO/PL-pgSQL
               -- -- rodar solto (como antes) dava "prepared statement does not
               -- exist" e, sem ON_ERROR_STOP, o psql saía com exit 0 mesmo assim.
-              DO $$
+              -- Tag nomeada ($body$, não o $$ anônimo): o /bin/sh desta imagem
+              -- é dash, que tem um bug real de parsing de heredoc -- mesmo com
+              -- delimitador citado (<<'SQL', sem expansão), dash engole um dos
+              -- dois $ da sequência "$$" (confirmado ao vivo via od -c: o
+              -- arquivo gerado saía com "DO $"/"END $;", um $ só). $body$ não
+              -- aciona esse parsing especial por não ser dois $ adjacentes.
+              DO $body$
               BEGIN
                 EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), current_setting('custom.sv_user'));
                 EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', current_setting('custom.sv_user'));
                 EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA public TO %I', current_setting('custom.sv_user'));
-              END $$;
+              END $body$;
               SQL
               echo "Aguardando o Postgres do cluster ficar disponivel..."
               until psql -v ON_ERROR_STOP=1 -h postgres-service.protheus-devops.svc.cluster.local -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1" > /dev/null 2>&1; do

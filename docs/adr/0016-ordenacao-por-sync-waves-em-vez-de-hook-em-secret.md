@@ -38,6 +38,21 @@ apareceram, os dois primeiros confirmados ao vivo nesta sessão:
    2026-09-19) — e conectando como `protheus` (que é `rolcreaterole=false`) o `CREATE USER`
    nunca teria funcionado de verdade; só não quebrava porque `SV_USER` já existia e o
    `IF NOT EXISTS` pulava a criação.
+4. **Achado real só descoberto ao aplicar a correção de verdade, não em teoria**: com os três
+   pontos acima corrigidos, o primeiro sync real do Job ainda falhou — 8 vezes seguidas (dois
+   ciclos de `backoffLimit: 3`, mesmo erro determinístico nos 8), com
+   `psql:/tmp/init-smartview.sql:4: ERROR: syntax error at or near "$"` bem no `DO $$` que nunca
+   tinha sido tocado. Reproduzido de forma isolada (Pod avulso fora do Kustomize, mesma imagem/
+   env/args, sem Argo CD no meio) e confirmado via `od -c` no arquivo gerado dentro do
+   container: `/bin/sh` desta imagem é `dash` (`/usr/bin/dash`), e o `cat <<'SQL' > arquivo`
+   heredoc — mesmo com delimitador **citado** (`<<'SQL'`, que deveria desligar toda expansão) —
+   engolia um dos dois `$` da sequência `$$`, produzindo `DO $`/`END $;` no arquivo real em vez
+   de `DO $$`/`END $$;`. Bug de parsing do `dash` específico para o par `$$` adjacente dentro de
+   heredoc, não documentado como tal em lugar óbvio — só a inspeção byte a byte (`od -c`)
+   revelou. Corrigido trocando o delimitador dólar-cotado anônimo (`$$`) por uma tag nomeada
+   (`$body$`) nos dois blocos `DO` — `$body$` não é um par de `$` adjacentes, não aciona o mesmo
+   parsing, e é sintaxe PL/pgSQL padrão. Validado ao vivo, incluindo o Job real rodando via Argo
+   CD depois da correção.
 
 ## Decisão
 A dependência entre `smartview-db-init-job` e os secrets que ele consome passou a ser resolvida
@@ -57,8 +72,8 @@ normal de wave 0, como `postgres-secret` sempre foi. `postgres-secret.sealed.yam
 (nunca chegou a virar hook). O Job trocou `POSTGRES_USER`/`POSTGRES_DB` literais por
 `envFrom: configMapRef: postgres-config` (agora possível — o ConfigMap já existe na wave 1) e o
 SQL foi corrigido: `ON_ERROR_STOP=1` em toda invocação do `psql`, GRANTs dentro de bloco
-`DO $$ ... END $$`, e o `\c postgres` removido (o Job já conecta como `postgres` via
-`envFrom`/`current_database()`).
+`DO $body$ ... END $body$`, o `\c postgres` removido (o Job já conecta como `postgres` via
+`envFrom`/`current_database()`), e a tag `$$` anônima trocada por `$body$` (achado 4 acima).
 
 ## Consequências
 - Nenhum SealedSecret deste repo é hook — todos ficam sob reconciliação normal e `selfHeal`.
@@ -70,7 +85,12 @@ SQL foi corrigido: `ON_ERROR_STOP=1` em toda invocação do `psql`, GRANTs dentr
   (`PreSync`), o Job rodava antes de qualquer coisa da wave 0. Se algum recurso da wave 0 ficar
   degradado, o Job (e o `smartview`) atrasam junto — é a dependência real que o Job sempre teve,
   só que agora declarada em vez de escondida atrás de `PreSync`.
-- **Limite desta correção**: ela resolve o defeito de manifesto (verificável num sync normal,
-  com todos os secrets já existentes) mas não foi validada no cenário exato que a motivou — um
-  drill de `k3d cluster delete` genuinamente do zero. Essa prova fica para a próxima vez que o
-  drill do ADR 0013 for repetido.
+- O bug do `dash` (achado 4) é uma classe de risco nova para qualquer script deste repo que gere
+  SQL/config via heredoc dentro de um container Alpine (`/bin/sh` = `dash` é comum nessas
+  imagens, não só na do SmartView) — vale desconfiar de qualquer `$$`/par de caracteres especiais
+  adjacentes dentro de heredoc citado em scripts futuros, e preferir tags nomeadas por hábito.
+- **Limite desta correção**: ela resolve o defeito de manifesto e foi validada com um sync real
+  via Argo CD (Job rodando como hook `Sync`/wave 1, `datacl` de `postgres` deixando de ser
+  `NULL`) — mas não no cenário exato que motivou o ADR 0013 (`postgres-secret` inexistente): isso
+  só é exercitado num bootstrap genuinamente do zero, que fica para a próxima vez que o drill do
+  ADR 0013 for repetido.
