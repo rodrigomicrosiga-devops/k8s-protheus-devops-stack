@@ -19,3 +19,11 @@ resources:
     memory: 256Mi
   limits:
     memory: 1Gi
+
+# Achado real (reconstrução do velero.yaml cifrado, drill do zero de
+# 2026-09-21 -- ver docs/adr/0011): o default do chart (snapshotsEnabled:
+# true) tenta criar um VolumeSnapshotLocation sem provider/credential
+# configurados (não usamos snapshot de volume nativo de cloud, só File
+# System Backup via node-agent acima) -- instalação falha com "spec.provider
+# ... must be of type string: null". Desligar explicitamente.
+snapshotsEnabled: false

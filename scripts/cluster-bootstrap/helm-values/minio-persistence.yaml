@@ -6,3 +6,14 @@
 persistence:
   enabled: true
   existingClaim: minio-backup-pvc
+
+# Achado real (drill do zero, 2026-09-21): o default do chart pede
+# resources.requests.memory: 16Gi -- dimensionado pra MinIO distribuído de
+# produção, não cabe em nenhum dos dois nodes deste cluster local (pod fica
+# Pending, "Insufficient memory"). MinIO standalone servindo um único bucket
+# de backup local não precisa disso.
+resources:
+  requests:
+    memory: 256Mi
+  limits:
+    memory: 512Mi
