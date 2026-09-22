@@ -4,7 +4,76 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-21 ~15:15 UTC — follow-up do ADR 0013 fechado: hook smartview-db-init corrigido e validado ao vivo)
+## Onde paramos (2026-09-21 ~22:30 UTC — drill completo de cluster do zero, ADR 0016 validado no cenário exato, passphrase do cofre GPG rotacionada)
+
+Sessão longa, dois objetivos em sequência: (1) corrigir o hook `smartview-db-init` (follow-up do
+ADR 0013), (2) a pedido do usuário, **executar de verdade** um `k3d cluster delete` completo pra
+provar a correção no cenário exato que a motivou — bootstrap genuinamente do zero, sem nenhum
+Secret pré-existente. Os dois fechados com sucesso. Detalhe completo, achados e evidências em
+`docs/adr/0016-ordenacao-por-sync-waves-em-vez-de-hook-em-secret.md` e
+`docs/adr/0013-cluster-bootstrap-do-zero.md` (seção "Segunda execução do drill").
+
+### Parte 1 — correção do hook (detalhe no histórico logo abaixo)
+`smartview-db-init-job` saiu de hook `PreSync` pra `Sync`/wave 1; SQL corrigido (`ON_ERROR_STOP=1`,
+GRANTs em bloco `DO`); achado à parte, bug real do `dash` no heredoc (`$$` virava `$`), corrigido
+trocando pra tag nomeada `$body$`. Validado com 2 syncs no cluster que já existia.
+
+### Parte 2 — drill completo do zero (`k3d cluster delete` real, receita 00→04 do ADR 0013)
+**Resultado do objetivo principal: sucesso total, sem NENHUMA intervenção manual.** Primeiro sync
+completou `Synced`/`Healthy` sozinho — diferente das duas vezes anteriores que passaram por esse
+caminho (drill de 18/09, precisou de bypass manual; correção do mesmo dia 21/09 na Parte 1, teve 8
+falhas pelo bug do `dash`). Linha de base batida: 167 tabelas, hash do `tttm120.rpo`/`custom.rpo`
+idênticos, os 4 `SealedSecret` decifrados corretamente.
+
+**Cinco achados reais novos** (detalhe completo no ADR 0013 "Segunda execução"):
+1. Node recriado por `01-fix-cgroupns.sh` pode ficar preso em `NotReady` por senha de registro
+   desatualizada — `kubectl delete secret -n kube-system <node>.node-password.k3s` resolve.
+2. `server-0` pode voltar `SchedulingDisabled` sem causa raiz (já documentado em
+   `scripts/k3d-nodes/README.md`) — `kubectl uncordon` resolve.
+3. Chart `minio/minio` pede `resources.requests.memory: 16Gi` por default — não cabe no cluster
+   local, corrigido em `minio-persistence.yaml` (256Mi/512Mi).
+4. Chart `vmware-tanzu/velero` tenta criar `VolumeSnapshotLocation` inválido quando
+   `snapshotsEnabled` fica no default (`true`) — este projeto só usa File System Backup, corrigido
+   em `velero-overrides.yaml` (`snapshotsEnabled: false`).
+5. **Passphrase do cofre GPG (ADR 0011) genuinamente perdida** — usuário não conseguiu recuperar
+   (tentativas malsucedidas). Rotacionada: passphrase nova gerada e entregue uma única vez.
+   `kube-prometheus-stack.yaml.gpg`/`minio.yaml.gpg`/`velero.yaml.gpg` reconstruídos do zero
+   (schema de cada chart via `helm show values`) e reencriptados; `sealed-secrets-keys-backup.
+   yaml.gpg` reexportado **ao vivo** do cluster já restaurado e reencriptado também. Únicos achados
+   3/4 (memória do MinIO, snapshot do Velero) só apareceram porque os `.gpg` antigos (que
+   provavelmente já tinham isso ajustado) foram perdidos e reconstruídos do zero.
+
+**Não migrado pra passphrase nova** (follow-up de baixa prioridade, não bloqueia nada):
+`base/postgres-secret.env.gpg` continua sob a passphrase antiga — valor é o default documentado
+no `CLAUDE.md` (`ProtheusPwd2026`), recuperável sem depender do GPG.
+
+**Validação funcional real do Velero/MinIO/node-agent**, não só pods `Running`: backup sob demanda
+(`velero backup create`) completou — 269/269 itens, 2 volumes via `kopia` (File System Backup),
+hook do `pg_dump` sem falha, fase `Completed`.
+
+**Documentação já corrigida nesta sessão** (não ficou como pendência): `scripts/cluster-bootstrap/
+README.md` e o texto impresso por `03-install-argocd.sh` — ambos citavam o bypass manual do hook
+como se ainda fosse necessário, atualizados pra refletir a correção do ADR 0016.
+
+**Erro real cometido nesta sessão, sem consequência**: deletei o namespace `argocd` sem necessidade
+(achando que precisava recriá-lo — `helm --create-namespace` já lida com namespace existente) logo
+depois do usuário ter criado o `dockerhub-creds` nele — apagou o secret junto. Pedido pro usuário
+recriar de novo, sem mais incidentes.
+
+### Verificações rápidas ao retomar
+- `kubectl get applications -n argocd protheus-devops-stack` → `Synced`/`Healthy`.
+- `kubectl get pods -n protheus-devops` → 13 pods `1/1`.
+- `kubectl get pods -n velero -n falco -n monitoring` → tudo `Running`/`Completed`.
+- `kubectl exec deployment/postgres -n protheus-devops -- psql -U postgres -d protheus -tAc
+  "select count(*) from information_schema.tables where table_schema='public'"` → `167`.
+- `docker ps --filter name=protheus_` deve vir vazio.
+- Nodes deste cluster são os RECRIADOS nesta sessão (`k3d-protheus-cluster-*`) — o cluster antigo
+  foi destruído de verdade, não é mais o mesmo container Docker de sessões anteriores.
+
+**Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
+ou aqui, leia "o cluster de dev".
+
+## Histórico condensado da sessão de 2026-09-21, parte 1 — correção do hook smartview-db-init
 
 Sessão de continuação. Único item de manifesto conhecido em aberto (ADR 0013, achado 1):
 `smartview-db-init-job` rodava como hook `PreSync` dependendo de `postgres-secret`, um
@@ -43,22 +112,6 @@ primeira tentativa depois da correção do `dash`:
 - 13 pods `1/1 Running`, sem restart novo em nenhum; 167 tabelas intactas.
 - Limpeza pós-depuração: dois artefatos de teste (`testuser999`/`testdb999`) criados durante a
   investigação manual foram removidos do banco antes de considerar a sessão fechada.
-
-### Limite honesto desta validação
-Não prova o cenário exato que originou o achado 1 do ADR 0013 (`postgres-secret` inexistente,
-bootstrap genuinamente do zero) — só é exercitado com `k3d cluster delete` de verdade. Fica pra
-próxima vez que esse drill for repetido.
-
-### Verificações rápidas ao retomar
-- `kubectl get applications -n argocd protheus-devops-stack` → `Synced`/`Healthy`.
-- `kubectl get pods -n protheus-devops` → 13 pods `1/1` (o `smartview-db-init` não aparece mais
-  depois de um sync bem-sucedido — `hook-delete-policy: HookSucceeded` o remove sozinho).
-- `kubectl exec deployment/postgres -n protheus-devops -- psql -U postgres -d protheus -tAc
-  "select count(*) from information_schema.tables where table_schema='public'"` → `167`.
-- `docker ps --filter name=protheus_` deve vir vazio.
-
-**Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
-ou aqui, leia "o cluster de dev".
 
 ## Histórico condensado da sessão de 2026-09-20 (cliente SIGAACD)
 

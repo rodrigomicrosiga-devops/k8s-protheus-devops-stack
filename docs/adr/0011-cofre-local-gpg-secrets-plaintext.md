@@ -1,7 +1,8 @@
 # ADR 0011 — Cofre local com GPG simétrico pro insumo plaintext dos SealedSecrets
 
 ## Status
-Aceito, implementado em 2026-09-18.
+Aceito, implementado em 2026-09-18. Passphrase rotacionada em 2026-09-21 (ver "Acréscimo" no
+fim) — a original não foi recuperada.
 
 ## Contexto
 `base/postgres-secret.env` é o insumo em texto plano usado (via `kubeseal`) pra gerar
@@ -53,3 +54,27 @@ O `base/postgres-secret.env` em texto puro foi removido do disco depois de:
 - Risco residual aceito conscientemente: a passphrase em si não tem backup automatizado (fica só
   no gerenciador de senhas do usuário) — decisão deliberada, consistente com o escopo "cofre
   local" pedido, não um sistema de gestão de segredos multi-usuário.
+
+## Acréscimo de 2026-09-21 — passphrase original perdida, rotacionada
+
+O risco residual documentado acima se materializou: no meio do drill de "cluster do zero" (ADR
+0013, segunda execução), a passphrase original não foi reconhecida por nenhuma tentativa do
+usuário. Causa provável, não confirmada: o `gpg-agent` provavelmente tinha cacheado a passphrase
+de uma sessão anterior (explicando por que `sealed-secrets-keys-backup.yaml.gpg` decriptou sem
+digitação manual mais cedo na mesma sessão) e o cache expirou antes da tentativa seguinte
+(`kube-prometheus-stack.yaml.gpg`), forçando digitação manual que não teve êxito. Decisão do
+usuário: gerar passphrase nova (`openssl rand -base64 32`, mesmo método) em vez de continuar
+tentando recuperar a antiga.
+
+**Escopo da rotação — nem todo o cofre foi migrado, de propósito**:
+- Migrados pra passphrase nova: os 3 `helm-values/*.yaml.gpg` com credencial
+  (`kube-prometheus-stack`, `minio`, `velero` — reconstruídos do zero, valor antigo perdido de
+  verdade) e `scripts/cluster-bootstrap/sealed-secrets-keys-backup.yaml.gpg` (reexportado **ao
+  vivo** do cluster já restaurado, não precisou reconstruir — as chaves em si não mudaram, só a
+  cifra do backup).
+- **Não migrado**: `base/postgres-secret.env.gpg` continua sob a passphrase antiga. Não é
+  urgente — o valor plaintext é o default documentado no `CLAUDE.md` (`ProtheusPwd2026`),
+  recuperável sem depender do GPG. Fica como follow-up de baixa prioridade: re-encriptar com a
+  passphrase nova pra não deixar o cofre com duas passphrases ativas ao mesmo tempo.
+- A passphrase nova foi exibida ao usuário uma única vez (mesmo tratamento do ADR original) —
+  não fica retida em nenhum lugar deste repositório ou sessão.

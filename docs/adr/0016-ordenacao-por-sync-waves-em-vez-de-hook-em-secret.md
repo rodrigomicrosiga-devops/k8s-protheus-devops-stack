@@ -1,7 +1,9 @@
 # ADR 0016 — Ordenação entre recursos via sync-waves, não promovendo Secret a hook
 
 ## Status
-Aceito, implementado e validado ao vivo (2026-09-21).
+Aceito, implementado e validado ao vivo (2026-09-21) — incluindo o cenário exato que motivou a
+correção (`postgres-secret` genuinamente inexistente, drill completo de `k3d cluster delete`, ver
+"Acréscimo" no fim).
 
 ## Contexto
 O ADR 0013 (drill de cluster do zero, 2026-09-19) descobriu que o hook `PreSync`
@@ -89,8 +91,14 @@ SQL foi corrigido: `ON_ERROR_STOP=1` em toda invocação do `psql`, GRANTs dentr
   SQL/config via heredoc dentro de um container Alpine (`/bin/sh` = `dash` é comum nessas
   imagens, não só na do SmartView) — vale desconfiar de qualquer `$$`/par de caracteres especiais
   adjacentes dentro de heredoc citado em scripts futuros, e preferir tags nomeadas por hábito.
-- **Limite desta correção**: ela resolve o defeito de manifesto e foi validada com um sync real
-  via Argo CD (Job rodando como hook `Sync`/wave 1, `datacl` de `postgres` deixando de ser
-  `NULL`) — mas não no cenário exato que motivou o ADR 0013 (`postgres-secret` inexistente): isso
-  só é exercitado num bootstrap genuinamente do zero, que fica para a próxima vez que o drill do
-  ADR 0013 for repetido.
+## Acréscimo de 2026-09-21 — validado no cenário exato que motivou a correção
+
+O limite documentado acima (validação só num cluster já existente, não no bootstrap genuinamente
+do zero) foi fechado no mesmo dia: drill completo de `k3d cluster delete` real, seguido da receita
+00→04 inteira (ADR 0013, "Segunda execução"), com `postgres-secret` de fato inexistente até o
+próprio sync criá-lo. **Resultado: sync completo, `Synced`/`Healthy`, sem nenhuma intervenção
+manual** — diferente das duas vezes anteriores que passaram por esse caminho (o drill original de
+18/09, que precisou do bypass documentado no ADR 0013; e a correção do mesmo dia 21/09 antes deste
+acréscimo, que teve 8 falhas pelo bug do `dash` já corrigido acima). Detalhe completo, incluindo
+achados novos não relacionados a este ADR (encontrados na mesma sessão), em
+`docs/adr/0013-cluster-bootstrap-do-zero.md`.

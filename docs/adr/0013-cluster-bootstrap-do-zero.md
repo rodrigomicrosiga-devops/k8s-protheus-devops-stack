@@ -99,6 +99,60 @@ uma seção de validação, não só a decisão em teoria):
    `scripts/k3d-nodes/k3d-node-rshared.service` (unit systemd, `After=docker.service`). Vale
    também pro `node-agent` do Velero (ADR 0015), que precisa enxergar `/var/lib/kubelet/pods`.
 
+## Segunda execução do drill (2026-09-21) — valida a correção do ADR 0016
+
+Drill completo repetido ao vivo, `k3d cluster delete` real seguido da receita 00→04 inteira,
+desta vez com objetivo duplo: (1) provar que a correção do ADR 0016 (`smartview-db-init-job`
+saiu de hook `PreSync` para `Sync`/wave 1) resolve de verdade o achado 1 acima, no cenário exato
+que o motivou — `postgres-secret` genuinamente inexistente até o próprio sync criá-lo; (2)
+decisão do usuário de **não restaurar backups opcionais** (pulou o `pg_dump` de segurança —
+manteve a restauração das chaves do sealed-secrets, que não é opcional, é pré-requisito pros 4
+`SealedSecret` já commitados continuarem decifráveis).
+
+**Resultado do objetivo principal: sucesso total, sem intervenção manual nenhuma.** Diferente da
+primeira execução (que precisou do bypass manual documentado no achado 1) e da sessão que
+corrigiu o manifesto no mesmo dia (que teve 8 falhas por um bug de heredoc do `dash`, ver ADR
+0016), desta vez o primeiro sync completou `Synced`/`Healthy` de ponta a ponta sozinho. Validado
+contra a linha de base capturada antes de destruir: 167 tabelas (idêntico), hash do
+`tttm120.rpo`/`custom.rpo` idênticos, os 4 `SealedSecret` decifrados corretamente.
+
+**Cinco achados reais novos**, nenhum coberto pelas duas execuções anteriores do drill:
+
+1. **Node recriado pelo `01-fix-cgroupns.sh` pode falhar em se registrar** — `agent-0`, depois de
+   `docker stop`/`docker rm`/`docker run`, gerou uma senha de registro nova
+   (`/etc/rancher/node/password`), mas o server ainda tinha o hash antigo salvo no `Secret`
+   `<node>.node-password.k3s` — erro real no log do server: `unable to verify password for node
+   ...: hash does not match`, node preso em `NotReady`/`Kubelet stopped posting node status`. O
+   próprio `01-fix-cgroupns.sh` já imprime a correção no fim ("Apagar o Secret de senha de
+   registro do node, se existir") mas não a executa sozinho — rodar
+   `kubectl delete secret -n kube-system <node>.node-password.k3s` resolve, o agent se registra
+   de novo em segundos. Não aconteceu no drill de 18/09 (não documentado lá) — pode depender de
+   timing entre quando o container antigo escreve a senha e quando é destruído.
+2. **`server-0` pode voltar `SchedulingDisabled`/`Unschedulable: true` sem causa raiz** — já
+   documentado como achado recorrente sem explicação em `scripts/k3d-nodes/README.md` (não era
+   exclusivo desta receita). Correção conhecida: `kubectl uncordon <node>`.
+3. **Chart `minio/minio` pede `resources.requests.memory: 16Gi` por default** (dimensionado pra
+   modo distribuído) — nenhum dos 2 nodes deste cluster local comporta, pod MinIO ficava
+   `Pending`/`Insufficient memory`. Não apareceu antes porque o `minio.yaml.gpg` original (agora
+   perdido, ver ADR 0011) provavelmente já tinha esse limite ajustado — ao reconstruir do zero, o
+   default agressivo do chart voltou a valer. Fixado em `minio-persistence.yaml` (overlay sem
+   segredo, 256Mi/512Mi).
+4. **Chart `vmware-tanzu/velero` tenta criar `VolumeSnapshotLocation` com `provider`/`credential`
+   nulos quando `snapshotsEnabled` fica no default (`true`)** — instalação falha com
+   `spec.provider ... must be of type string: null`. Este projeto só usa File System Backup via
+   `node-agent`, nunca snapshot nativo de volume — mesma hipótese do achado 3 (o `velero.yaml.gpg`
+   original devia já ter isso desligado). Fixado em `velero-overrides.yaml`
+   (`snapshotsEnabled: false`).
+5. **Passphrase do cofre GPG (ADR 0011) genuinamente perdida** — bloqueou a fase de extras até
+   ser rotacionada. Detalhe completo no acréscimo do ADR 0011.
+
+Achado 1 do ADR 0013 original (a dependência circular do `smartview-db-init-job`) confirmado
+**resolvido de fato**, não só em teoria — ver ADR 0016 pro detalhe da correção.
+
+**Follow-up real ainda aberto**: `scripts/cluster-bootstrap/README.md` e o texto impresso por
+`03-install-argocd.sh` ainda descrevem o bypass manual do achado 1 como se fosse necessário —
+desatualizados, não corrigidos nesta sessão (ver `docs/HANDOFF.md`).
+
 ## Consequências
 - Fecha o item 3 do backlog — receita completa versionada, testada ao vivo (ver Validação).
 - `scripts/cluster-bootstrap/01-fix-cgroupns.sh` generaliza a lógica do ADR 0008/`scripts/k3d-nodes/`

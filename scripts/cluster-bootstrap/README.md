@@ -93,28 +93,29 @@ Ver ADR 0013 pro detalhe completo. Resumo:
 - O `serverlb` nasce **sem** a porta 7890 desde o primeiro `k3d cluster create` desta receita
   (`00-create-cluster.sh` já não mapeia) — diferente do cluster original, que precisou de um
   `k3d cluster edit --port-delete` depois (item 4 do backlog, já fechado).
-- **O primeiro sync completo do Argo CD TRAVA no hook `PreSync` `smartview-db-init`** — confirmado
-  ao vivo, não é hipótese. O hook depende de `postgres-secret` (`envFrom.secretRef`), mas esse é
-  um `SealedSecret` comum de `Sync`, não um hook — nunca existe a tempo num bootstrap
-  genuinamente do zero. Desbloqueio manual (bypass pontual do Argo CD, mesmo padrão do ADR 0012):
-  ```sh
-  kubectl apply -f base/postgres-secret.sealed.yaml
-  kubectl kustomize base/ | python3 -c "import sys,yaml
-  for d in yaml.safe_load_all(sys.stdin):
-      if d and d.get('kind')=='ConfigMap' and d['metadata']['name'].startswith('postgres-config'):
-          print(yaml.dump(d))" | kubectl apply -f -
-  kubectl apply -f base/postgres.yaml
-  kubectl patch deployment postgres -n protheus-devops --type json \
-    -p '[{"op":"replace","path":"/spec/template/spec/containers/0/envFrom/0/configMapRef/name","value":"<nome-com-hash-do-comando-acima>"}]'
-  ```
-  Depois disso o hook completa sozinho e o resto do sync segue normal (inclusive corrigindo o
-  digest da imagem do Postgres, que o `apply` direto tinha revertido pra tag solta). Ver ADR 0013
-  "Validação" pro relato completo. **Não corrigido no manifesto** (mover `postgres-secret` pra
-  dentro do hook, ou remover a dependência) — fica como follow-up real, fora do escopo deste
-  drill.
+- ~~O primeiro sync completo do Argo CD TRAVA no hook `PreSync` `smartview-db-init`~~ **(HISTÓRICO
+  — corrigido pra sempre em 2026-09-21, não se aplica mais, ver abaixo).** Causa era o hook
+  depender de `postgres-secret` (`envFrom.secretRef`), um `SealedSecret` comum de `Sync`, não um
+  hook — nunca existia a tempo num bootstrap genuinamente do zero. O bypass manual que era
+  necessário até 2026-09-20 (`kubectl apply` direto em `postgres-secret`/`postgres-config`/
+  `postgres.yaml` + patch do `envFrom`, documentado em detalhe no ADR 0013 "Validação") **foi
+  fechado pra sempre** pela correção do ADR 0016: o Job saiu de hook `PreSync` pra `Sync`/wave 1,
+  não depende mais de nada que só existe depois dele na mesma operação. Validado ao vivo num
+  segundo drill do zero (ADR 0013, "Segunda execução") — sync completo sem nenhuma intervenção
+  manual. Nada a fazer aqui além de deixar o sync rodar.
 - Nodes recriados por `01-fix-cgroupns.sh` **já corrigem sozinhos** a propagação do mount raiz
   (`mount --make-rshared /`, rodado automaticamente no fim do script) — sem isso,
   `prometheus-node-exporter` falha (achado real do drill de 2026-09-18, ver ADR 0013).
+- O 01-fix-cgroupns.sh pode deixar o node recriado preso em `NotReady` por senha de registro
+  desatualizada (`unable to verify password for node ...: hash does not match`) — apagar
+  `kubectl delete secret -n kube-system <node>.node-password.k3s` resolve (achado real, ADR 0013
+  "Segunda execução"). `server-0` também pode voltar `SchedulingDisabled` sem causa raiz
+  (`kubectl uncordon <node>`, mesmo achado documentado em `scripts/k3d-nodes/README.md`).
+- Os charts `minio/minio` e `vmware-tanzu/velero` têm defaults que não cabem/não funcionam num
+  cluster local (`resources.requests.memory: 16Gi` do MinIO; `snapshotsEnabled: true` do Velero
+  tentando criar snapshot sem provider configurado) — já corrigidos nos overlays sem segredo
+  (`minio-persistence.yaml`/`velero-overrides.yaml`), só reaparecem se os `.yaml.gpg` precisarem
+  ser reconstruídos do zero de novo (ver ADR 0013 "Segunda execução" e ADR 0011).
 - A primeira tentativa de instalar o Velero historicamente falhou
   (`VolumeSnapshotLocation` com `credential`/`provider` nulos) — o `helm upgrade --install` do
   script 04 já é idempotente e resolve na segunda passada sozinho.
