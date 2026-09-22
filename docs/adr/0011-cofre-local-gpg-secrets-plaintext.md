@@ -72,9 +72,27 @@ tentando recuperar a antiga.
   verdade) e `scripts/cluster-bootstrap/sealed-secrets-keys-backup.yaml.gpg` (reexportado **ao
   vivo** do cluster já restaurado, não precisou reconstruir — as chaves em si não mudaram, só a
   cifra do backup).
-- **Não migrado**: `base/postgres-secret.env.gpg` continua sob a passphrase antiga. Não é
-  urgente — o valor plaintext é o default documentado no `CLAUDE.md` (`ProtheusPwd2026`),
-  recuperável sem depender do GPG. Fica como follow-up de baixa prioridade: re-encriptar com a
-  passphrase nova pra não deixar o cofre com duas passphrases ativas ao mesmo tempo.
 - A passphrase nova foi exibida ao usuário uma única vez (mesmo tratamento do ADR original) —
   não fica retida em nenhum lugar deste repositório ou sessão.
+
+### Follow-up fechado em 2026-09-22 — `postgres-secret.env.gpg` migrado, cofre unificado
+
+O item "não migrado" acima foi resolvido. Achado no processo, não no manifesto: a passphrase
+gerada por `openssl rand -base64 32` e entregue ao usuário no fim da sessão anterior **não é
+mais a que está em vigor** — o usuário a substituiu por uma própria, memorável, depois do fim
+daquela sessão, sem isso ficar registrado em lugar nenhum (natural, já que passphrase nunca é
+documentada em texto). Isso causou confusão real na sessão seguinte: duas candidatas em mãos
+(a gerada, anotada pelo usuário; e a memorável, definida depois), sem forma de saber qual valia
+sem testar. Resolvido testando contra um dos arquivos já migrados
+(`scripts/cluster-bootstrap/helm-values/minio.yaml.gpg`, baixo risco) antes de mexer em
+qualquer coisa — a memorável autenticou.
+
+Com isso confirmado, `base/postgres-secret.env` foi recriado direto do valor documentado no
+`CLAUDE.md` (`ProtheusPwd2026` — não havia necessidade de decriptar o `.gpg` antigo, cuja
+passphrase original já era irrecuperável desde antes da rotação) e re-encriptado com a
+passphrase em vigor. O cofre inteiro agora está sob uma única passphrase ativa.
+
+**Lição pro processo, não só pro manifesto**: se a passphrase de um cofre single-user for
+trocada fora de uma sessão registrada, não há como a próxima sessão saber — o teste empírico
+contra um arquivo de baixo risco (não o mais sensível) é o jeito seguro de confirmar antes de
+agir, em vez de assumir qual candidata está certa.

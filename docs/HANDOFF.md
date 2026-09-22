@@ -43,9 +43,13 @@ idênticos, os 4 `SealedSecret` decifrados corretamente.
    3/4 (memória do MinIO, snapshot do Velero) só apareceram porque os `.gpg` antigos (que
    provavelmente já tinham isso ajustado) foram perdidos e reconstruídos do zero.
 
-**Não migrado pra passphrase nova** (follow-up de baixa prioridade, não bloqueia nada):
-`base/postgres-secret.env.gpg` continua sob a passphrase antiga — valor é o default documentado
-no `CLAUDE.md` (`ProtheusPwd2026`), recuperável sem depender do GPG.
+~~Não migrado pra passphrase nova~~ **Resolvido em 2026-09-22**: `base/postgres-secret.env.gpg`
+recriado do valor documentado no `CLAUDE.md` (`ProtheusPwd2026`) e re-encriptado — cofre agora
+sob uma única passphrase ativa. Achado real no processo (não no manifesto): a passphrase gerada
+no fim desta sessão tinha sido substituída pelo usuário, fora de sessão registrada, por uma
+própria memorável — causou confusão real (duas candidatas, sem saber qual valia), resolvida
+testando contra um arquivo de baixo risco já migrado antes de agir. Detalhe completo no ADR 0011
+("Follow-up fechado em 2026-09-22").
 
 **Validação funcional real do Velero/MinIO/node-agent**, não só pods `Running`: backup sob demanda
 (`velero backup create`) completou — 269/269 itens, 2 volumes via `kopia` (File System Backup),
