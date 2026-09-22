@@ -4,7 +4,70 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-21 ~22:30 UTC — drill completo de cluster do zero, ADR 0016 validado no cenário exato, passphrase do cofre GPG rotacionada)
+## Onde paramos (2026-09-22 — cofre GPG unificado, permissão do volume SYSTEM corrigida e validada ao vivo)
+
+Sessão de continuação, dois itens do backlog herdado fechados na ordem que o usuário definiu
+(1, depois 3 — os itens 2 e 4 ficam para depois, por decisão dele: item 2/`UPDDISTR` só após
+revalidar toda a stack neste cluster novo; item 4/restore só ao final de tudo).
+
+### Item 1 — cofre GPG unificado sob uma única passphrase
+`base/postgres-secret.env.gpg` (que tinha ficado de fora da rotação de 21/09, sob a passphrase
+antiga já perdida) recriado do valor documentado no `CLAUDE.md` (`ProtheusPwd2026`) e
+re-encriptado. **Achado real no processo**: a passphrase gerada no fim da sessão de 21/09 tinha
+sido substituída pelo usuário, fora de sessão registrada, por uma própria memorável — causou
+confusão real na retomada (duas candidatas em mãos, sem saber qual valia; tentativa de decrypt
+com a errada pareceu "bug" mas era só a passphrase errada). Resolvido testando contra um arquivo
+de baixo risco já migrado (`minio.yaml.gpg`) antes de agir — nunca decida por suposição qual
+passphrase está em vigor num cofre single-user. Detalhe completo no ADR 0011 ("Follow-up fechado
+em 2026-09-22"). Commit `10b0afd`.
+
+### Item 3 — permissão do volume SYSTEM corrigida na causa raiz, validado ao vivo de ponta a ponta
+Achado confirmado ao vivo (não só suspeita herdada): `fix-shared-volume-permissions` do
+`protheus-system-seed` só fazia `chmod 0777` na raiz de `/mnt/system`, não recursivo —
+subdiretórios extraídos por `fiscal.zip`/`menus.zip` (`dots/`, `estadual/`, `municipal/`,
+`fwbackup/`) ficavam `0755` donos `1000:1000`, e o seed (uid 100 no container) não conseguia
+sobrescrever nada dentro deles numa reextração real. Testado com `touch` como uid 100 antes/depois
+de um `chmod -R` isolado: `Permission denied` antes, `rc=0` depois.
+
+Dois fixes, dois repositórios:
+- `base/protheus-seed.yaml` (este repo): `chmod 0777` → `chmod -R 0777` no initContainer do
+  `protheus-system-seed`. Commit `3d93c41`, push feito pelo usuário (push do assistente foi
+  bloqueado pelo classificador de auto mode por "Credential Leakage" — reação ao fato de o
+  usuário ter colado passphrases reais no chat mais cedo na sessão, não ao conteúdo do diff, que
+  não tinha segredo nenhum em texto puro).
+- `docker-protheus-system/entrypoint.sh`: `unzip` retorna `rc=1` tanto pra avisos benignos
+  (separador `\` da TOTVS) quanto pra `Permission denied` ao tentar sobrescrever arquivo
+  existente — o código de saída sozinho não distinguia os dois, então uma extração parcial por
+  permissão ficava mascarada como sucesso (marcador gravado igual). `extract_or_fail()` agora
+  também inspeciona a saída do `unzip`, não só o `rc`. Commit `731c5ec`, push e CI (self-hosted)
+  publicaram `protheus-system-dev:12.1.2510` com digest novo.
+
+**Validação real de ponta a ponta, não só render/manifesto**: Image Updater detectou o digest
+novo (~2min de polling), pod recriado, `chmod -R` do initContainer rodou primeiro, e o
+`entrypoint.sh` novo **reprovisionou de verdade** (o marcador usa o SHA do commit como revisão,
+então qualquer mudança no `entrypoint.sh` força reextração no próximo restart, por design —
+mecanismo documentado no README do repo, não efeito colateral). Log do container: só o aviso
+benigno de separador de caminho, nenhum `permission denied`, `✅ Volume SYSTEM provisionado com
+sucesso`. Cluster confirmado depois: `Synced`/`Healthy`, 13 pods `1/1`, 167 tabelas intactas.
+
+### Pendências que ficam para depois (ordem definida pelo usuário)
+- **Item 2 — `UPDDISTR` do `EXPEDICAO_CONTINUA`**: decisão do usuário é revalidar toda a stack
+  neste cluster novo primeiro, só depois decidir se reaplica.
+- **Item 4 — restore real sobre o cluster principal**: só ao final de tudo, não é prioridade
+  agora (só o drill em namespace descartável do ADR 0015 foi exercitado até hoje).
+
+### Verificações rápidas ao retomar
+- `kubectl get applications -n argocd protheus-devops-stack` → `Synced`/`Healthy`.
+- `kubectl get pods -n protheus-devops` → 13 pods `1/1`.
+- `kubectl exec deployment/postgres -n protheus-devops -- psql -U postgres -d protheus -tAc
+  "select count(*) from information_schema.tables where table_schema='public'"` → `167`.
+- Cofre GPG: uma única passphrase ativa agora (a memorável que o usuário definiu em 21/09 à
+  noite) — cobre os 4 arquivos da rotação anterior mais `postgres-secret.env.gpg`.
+
+**Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
+ou aqui, leia "o cluster de dev".
+
+## Histórico condensado da sessão de 2026-09-21, parte 2 — drill completo de cluster do zero, ADR 0016 validado no cenário exato, passphrase do cofre GPG rotacionada
 
 Sessão longa, dois objetivos em sequência: (1) corrigir o hook `smartview-db-init` (follow-up do
 ADR 0013), (2) a pedido do usuário, **executar de verdade** um `k3d cluster delete` completo pra
