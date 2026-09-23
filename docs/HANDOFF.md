@@ -50,9 +50,49 @@ mecanismo documentado no README do repo, não efeito colateral). Log do containe
 benigno de separador de caminho, nenhum `permission denied`, `✅ Volume SYSTEM provisionado com
 sucesso`. Cluster confirmado depois: `Synced`/`Healthy`, 13 pods `1/1`, 167 tabelas intactas.
 
+### Depois dos itens 1/3: início da validação da stack (item 2), pausado antes de executar
+Sessão continuou com duas dúvidas reais do usuário, esclarecidas mas **sem nenhuma mudança de
+manifesto** — puramente investigativo, vale registrar porque molda como validar a stack amanhã:
+
+- **Acesso direto por `NodePort`, sem `port-forward`**: confirmado ao vivo que quase toda a stack
+  já expõe `NodePort` no IP do node agent (`docker inspect k3d-protheus-cluster-agent-0`, hoje
+  `172.18.0.3` — **não é fixo**, reconfirmar se o node for recriado): `dbaccess` (`:30890`),
+  `appserver-core` (`:31234` smartclient, `:32033` monitor), `appserver-rest` (`:30840`),
+  `appserver-telnet` (`:30023`), `license` (`:30555`/`:30820`), `smartview` (`:30719`/`:30717`).
+  Testado com `/dev/tcp` direto do host pros dois primeiros, portas abertas. **Só `postgres` é
+  `ClusterIP` puro** (`base/postgres.yaml`, decisão deliberada — banco não precisa de exposição
+  externa); pra validar o Postgres não precisa nem de `NodePort` nem de `port-forward`, `kubectl
+  exec deployment/postgres -- psql ...` já basta (é o que a sessão toda usou pra contar tabela).
+- **Achado real, esclarece uma confusão do usuário (não é bug)**: o usuário estranhou o banco já
+  vir totalmente populado (167 tabelas, login do admin do Protheus com `Protheus@1980` já
+  funcionando) depois do "cluster deletado 100%" do drill de 21/09 — esperava que o dado também
+  tivesse sido zerado. Causa raiz confirmada: `/media/rodrigo/dados/k8s-volume/` é um **bind
+  mount real do disco físico do host**, montado explicitamente na criação do cluster
+  (`scripts/cluster-bootstrap/00-create-cluster.sh:29`, `--volume
+  "${APP_DATA_HOSTPATH}:${APP_DATA_HOSTPATH}@agent:0"`), e `postgres-pv` (`base/postgres.yaml`)
+  é `hostPath` apontando pra dentro desse mesmo diretório. `k3d cluster delete` destrói os
+  containers Docker do control plane/nodes, mas nunca toca o bind mount — o dado sobrevive no
+  disco físico independente de quantas vezes o cluster em si for recriado. Confirmado por
+  evidência, não suposição: `PG_VERSION` do datadir tem timestamp de **19/09 17:26**, três dias
+  antes do drill. É desenho deliberado (ADR 0013/0015): o drill testa a reconstrução da
+  **infraestrutura** via GitOps, não perda de dado real — isso é o item 4 (restore real),
+  propositalmente adiado pro final. Também explica por que a regra dura de bootstrap manual do
+  `CLAUDE.md` nunca disparou no drill: ela só vale pra banco genuinamente vazio, e o banco nunca
+  ficou vazio porque os dados nunca saíram do host.
+
+**Sessão pausou aqui** — usuário fez os primeiros testes manuais mas não teve tempo de seguir a
+validação completa da stack hoje. Retomar amanhã.
+
+### Próximo passo ao retomar (não começado ainda)
+Validar a stack inteira neste cluster (pré-requisito que o usuário definiu antes do item 2/
+`UPDDISTR`). Nenhum roteiro formal foi montado ainda — perguntei ao usuário se ele queria um
+roteiro estruturado (conectividade, login SmartClient, SIGAACD via telnet, REST, etc.) ou seguir
+passo a passo com ele; não respondido ainda quando a sessão pausou. Primeira pergunta de amanhã:
+qual das duas abordagens ele quer.
+
 ### Pendências que ficam para depois (ordem definida pelo usuário)
 - **Item 2 — `UPDDISTR` do `EXPEDICAO_CONTINUA`**: decisão do usuário é revalidar toda a stack
-  neste cluster novo primeiro, só depois decidir se reaplica.
+  neste cluster novo primeiro (ver acima, ainda não começado), só depois decidir se reaplica.
 - **Item 4 — restore real sobre o cluster principal**: só ao final de tudo, não é prioridade
   agora (só o drill em namespace descartável do ADR 0015 foi exercitado até hoje).
 
@@ -63,6 +103,8 @@ sucesso`. Cluster confirmado depois: `Synced`/`Healthy`, 13 pods `1/1`, 167 tabe
   "select count(*) from information_schema.tables where table_schema='public'"` → `167`.
 - Cofre GPG: uma única passphrase ativa agora (a memorável que o usuário definiu em 21/09 à
   noite) — cobre os 4 arquivos da rotação anterior mais `postgres-secret.env.gpg`.
+- Login SmartClient/admin do Protheus: `Protheus@1980` (diferente e sem relação com a senha do
+  Postgres, `ProtheusPwd2026`).
 
 **Esta é uma instalação de dev/estudo** (sem ambiente de produção): ao ler "produção" nos ADRs
 ou aqui, leia "o cluster de dev".
