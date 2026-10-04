@@ -73,3 +73,14 @@ Cada script:
 - `server-0` voltou uma vez com `Unschedulable: true` (cordoned) sem causa raiz identificada
   depois de recriado. Os scripts não corrigem isso sozinhos — `print_next_steps` lembra o
   comando (`kubectl uncordon`), mas fique atento na validação.
+
+## Boot do host: ordem Docker × disco de dados (ADR 0018)
+
+`post-boot.sh` + `k3d-node-rshared.service` reaplicam o `rshared` a cada boot. Os dois só são
+confiáveis se o disco `/media/rodrigo/dados` estiver montado **antes** do Docker subir os nodes —
+senão o bind mount do `k8s-volume` aponta para uma pasta vazia do disco raiz (queda de energia de
+2026-10-04). `docker-wait-data-mount.conf` é o drop-in do `docker.service` que garante essa
+ordem; instalação e validação no cabeçalho do arquivo e no ADR 0018.
+
+Sintoma de mount tardio: `docker exec k3d-protheus-cluster-agent-0 ls /media/rodrigo/dados/k8s-volume`
+sem `postgres`/`protheus-apo`. Correção: `docker restart` nos dois nodes + `scripts/k3d-nodes/post-boot.sh`.

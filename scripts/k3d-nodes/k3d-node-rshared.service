@@ -7,10 +7,14 @@
 #   sudo systemctl enable --now k3d-node-rshared.service
 #
 # Ajuste User=/KUBECONFIG abaixo se o seu usuário/kubeconfig forem outros.
+# Pareado com docker-wait-data-mount.conf (ADR 0018): o ExecStart abaixo mora no
+# disco de dados, que pode montar depois do boot -- sem RequiresMountsFor o unit
+# falhava com 203/EXEC (script ainda inexistente) depois de uma queda de energia.
 [Unit]
 Description=Reaplica mount rshared nos nodes k3d (protheus-cluster)
 After=docker.service network-online.target
 Requires=docker.service
+RequiresMountsFor=/media/rodrigo/dados
 
 [Service]
 Type=oneshot
