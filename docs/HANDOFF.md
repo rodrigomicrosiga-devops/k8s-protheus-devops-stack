@@ -71,18 +71,20 @@ visível nos 13 pods), `docker ps` confirma as 12 portas em `127.0.0.1` (`1234`,
 portas TCP puras (dbaccess/telnet/license/postgres/monitor) respondendo via `nc -z`. 168 tabelas
 intactas, 0 restart novo nos pods, 2 nodes `Ready`, Argo CD `Synced`/`Healthy`.
 
-**Não verificado ainda**: login real via SmartClient desktop em `127.0.0.1:1234` (só a URL web
-foi testada via `curl`) e DBMonitor/psql de fato conectando (TCP aberto confirmado, handshake de
-aplicação não — faltou cliente `psql` no host pra testar direto; `kubectl exec` segue confiável
-pra consulta interna). Convivência com o Compose local (`127.0.0.2`) também não testada ainda —
-o Compose não foi erguido nesta sessão.
+**Confirmado pelo usuário, ao vivo**: `http://127.0.0.1:1234/webapp` abriu normalmente, e o
+DBMonitor conectou em `127.0.0.1:7890` sem nenhum `port-forward`. A porta `32033` (monitor do
+core) não foi testada — decisão dele, não é prioridade agora, fica pra quando precisar. ADR 0017
+considerado validado na prática, não só por `curl`/`nc`.
+
+**Não verificado ainda**: convivência com o Compose local (`127.0.0.2`) — o Compose não foi
+erguido nesta sessão, só o cluster.
 
 ### Próximo passo ao retomar
-1. Validar o que ficou pendente acima: login SmartClient real, DBMonitor/psql, convivência com o
-   Compose (`./run.sh postgres` com o cluster no ar, checar `127.0.0.2` responde e `127.0.0.1`
-   continua respondendo).
-2. Retomar a ideia do usuário de uma API própria para atualizar o ambiente — ainda não
-   detalhada.
+1. Retomar a ideia do usuário de uma API própria para atualizar o ambiente — ainda não
+   detalhada, próximo assunto da sessão.
+2. Quando for mexer no Compose de novo: validar convivência (`./run.sh postgres` com o cluster no
+   ar, checar `127.0.0.2` responde e `127.0.0.1` continua respondendo) — não é bloqueante, só
+   ainda não exercitado.
 3. Depois disso, retomar a validação completa da stack (item 2/backlog, ver histórico abaixo) —
    ainda não decidido entre roteiro estruturado ou passo a passo guiado pelo usuário.
 
