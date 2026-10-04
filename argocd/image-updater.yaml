@@ -94,6 +94,13 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/protheus-systemload-dev
+        - alias: protheus-manager-api
+          imageName: docker.io/rodrigomicrosiga/protheus-manager-api-dev:0.2.0
+          commonUpdateSettings:
+            updateStrategy: digest
+          manifestTargets:
+            kustomize:
+              name: rodrigomicrosiga/protheus-manager-api-dev
         # appserver-dev-worker (Fase E: worker/compile prontos em 2026-09-17, ver
         # base/appserver-worker-job.yaml e base/appserver-compile-job.yaml) continua de fora
         # de propósito -- os dois Jobs existem, mas ficam deliberadamente FORA de

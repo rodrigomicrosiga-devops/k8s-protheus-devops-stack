@@ -1,0 +1,139 @@
+# protheus-manager-api (repo irmão protheus-manager-api, desenho no ADR 0019).
+# Fase 1: SOMENTE LEITURA -- a Role abaixo não tem nenhum verbo de escrita. Quando as
+# fases 2/3 precisarem (scale, Jobs), a Role cresce junto, nunca antes, e nunca vira
+# cluster-admin. Stateless: sem volume, então RollingUpdate padrão (diferente dos
+# componentes com hostPath, ver README "Estratégia de Rollout").
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: protheus-manager
+  namespace: protheus-devops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: protheus-manager-leitura
+  namespace: protheus-devops
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: protheus-manager-leitura
+  namespace: protheus-devops
+subjects:
+  - kind: ServiceAccount
+    name: protheus-manager
+    namespace: protheus-devops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: protheus-manager-leitura
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: protheus-manager-api
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: protheus-manager-api
+  template:
+    metadata:
+      labels:
+        app: protheus-manager-api
+    spec:
+      serviceAccountName: protheus-manager
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: protheus-manager-api
+          image: rodrigomicrosiga/protheus-manager-api-dev:0.2.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8800
+          env:
+            - name: MANAGER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MANAGER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: manager-secret
+                  key: MANAGER_API_TOKEN
+            # Banco só para leitura de nomes de tabela (portão do bootstrap). Mesmo usuário
+            # da aplicação; a senha vem do postgres-secret que já existe.
+            - name: DB_HOST
+              value: postgres-service
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: postgres-config
+                  key: DB_USER
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: postgres-config
+                  key: DB_NAME
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: DB_PASS
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8800
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8800
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          # Contraste deliberado com o ADR 0001 (license/smartview privilegiados): esta API
+          # não precisa de nada além de falar HTTP e chamar o API server.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# NodePort 30880 -> exposto em 127.0.0.1:8800 pelo serverlb (ADR 0017, ver
+# scripts/cluster-bootstrap/00-create-cluster.sh). Só loopback: nada na rede.
+apiVersion: v1
+kind: Service
+metadata:
+  name: protheus-manager-api-service
+  namespace: protheus-devops
+spec:
+  type: NodePort
+  selector:
+    app: protheus-manager-api
+  ports:
+    - protocol: TCP
+      port: 8800
+      targetPort: 8800
+      nodePort: 30880
