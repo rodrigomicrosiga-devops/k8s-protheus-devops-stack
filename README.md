@@ -227,5 +227,15 @@ Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 001
   `SIGAACD` (versões em Python e Go); clientes genéricos (PuTTY) não navegam o menu dele — ver
   seção 6 acima e o README do próprio diretório para o diagnóstico completo.
 - [`docs/prompts/`](docs/prompts/) — prompts reutilizáveis para atualizar versão de binário TOTVS num repo `docker-protheus-*` e sincronizar as tags resultantes no `docker-compose.yaml` do repo irmão `docker-protheus-devops-stack`.
+- **Protheus Manager** — operação do ambiente sem terminal, em dois repositórios próprios (privados no
+  GitHub): [`protheus-manager-api`](https://github.com/rodrigomicrosiga-devops/protheus-manager-api)
+  (Go, Swagger em `http://127.0.0.1:8800/docs`) e
+  [`protheus-manager-web`](https://github.com/rodrigomicrosiga-devops/protheus-manager-web) (tela em
+  `http://127.0.0.1:8801`). Manifestos em [`base/protheus-manager.yaml`](base/protheus-manager.yaml) e
+  [`base/protheus-manager-web.yaml`](base/protheus-manager-web.yaml). Desenho nos ADRs
+  [0019](docs/adr/0019-protheus-manager-desenho.md) (o manager), [0020](docs/adr/0020-protheus-manager-web-desenho.md)
+  (frontend) e [0021](docs/adr/0021-api-do-manager-em-go.md) (migração para Go). Falta a Fase 3
+  (Jobs `worker`/`compile`/`upddistr`) — ver `docs/HANDOFF.md`.
+- ADRs 0017 (portas padrão do Protheus em `127.0.0.1`) e 0018 (o Docker espera o disco de dados no boot).
 
 

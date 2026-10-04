@@ -1,9 +1,14 @@
 # ADR 0019 — Desenho do `protheus-manager` (API + web): ações diretas no cluster, GitOps só onde o Argo CD é dono
 
 ## Status
-Proposto em 2026-10-04, decisões de desenho aceitas pelo usuário na mesma sessão. **Nada foi
-implementado**: nenhum repositório criado, `argocd/application.yaml` ainda sem `ignoreDifferences`.
-A implementação começa pela Fase 0 abaixo.
+Aceito em 2026-10-04 e **implementado até a Fase 2** (leitura, stop/start/restart, sync do Argo CD,
+backup sob demanda, auditoria), com o frontend (ADR 0020) e a API já migrada de Python para Go
+(ADR 0021). **A Fase 3 (Jobs `worker`/`compile`/`upddistr`) não existe.**
+
+> **Nota de leitura (2026-10-04, fim do dia):** este ADR é o registro cronológico do desenho. Onde ele
+> cita "Python 3.12 + FastAPI" (seção "Fase 0 — decisões tomadas" e a proposta de estrutura), **vale o
+> ADR 0021: a API é hoje Go**. O contrato HTTP e as regras (ações diretas no cluster, `ignoreDifferences`
+> em `replicas`, portão do bootstrap, RBAC por ação) seguem os descritos aqui.
 
 ## Contexto
 O usuário quer operar o ambiente Protheus do cluster sem ficar em terminal: consultar serviços,

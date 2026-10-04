@@ -4,7 +4,253 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-10-04, tarde — queda de energia, ADR 0018, desenho do manager em aberto)
+## Onde paramos (2026-10-04, fim do dia — Protheus Manager no ar; estado conferido ao vivo)
+
+> **Como ler:** ✅ = conferido ao vivo no fechamento desta sessão (2026-10-04, ~20:00–20:15 UTC);
+> 🟡 = validado antes, hoje, **não** revalidado agora; ❓ = **nunca** verificado. Esta seção foi escrita
+> **depois de reconferir tudo**, justamente porque a cronologia do dia (logo abaixo, "Histórico … tarde")
+> acumulou afirmações vencidas. Onde as duas divergirem, **esta manda**.
+>
+> Para retomar com o mínimo de atrito: use o prompt pronto em
+> [`docs/prompts/retomar-protheus-manager.md`](prompts/retomar-protheus-manager.md).
+
+### 0. Leia primeiro — três coisas que mudam o que fazer a seguir
+
+**0.1 🔴 As imagens com conteúdo TOTVS estão PÚBLICAS no Docker Hub — decisão do usuário.**
+- ✅ Verificado agora, sem credencial (um `HEAD` do manifesto; **nenhuma camada foi baixada**): HTTP 200 anônimo
+  para `protheus-rpo-dev:12.1.2510`, `protheus-system-dev:12.1.2510`, `protheus-systemload-dev:12.1.2510`,
+  `appserver-dev:24.3.1.9`, `dbaccess-dev:24.1.1.3` e `license-dev:3.7.2` (e as do manager). A API de
+  repositórios do Hub também responde 200 anônima para esses nomes.
+- Os READMEs de `docker-protheus-rpo/system/systemload` dizem "**repositório privado** — conteúdo TOTVS", e o
+  cluster tem o `regcred` (usado só pelos seeds e pelos Jobs `compile`/`worker`): **a intenção era privado; o
+  estado real é público.**
+- ❓ Não verificado: se as camadas (RPO de ~570 MB, dicionários) são de fato baixáveis sem login (manifesto 200
+  indica que sim) e qual a implicação de licença com a TOTVS. Quem avalia é o usuário.
+- ✅ **O que quebraria se virasse privado** (verificado nos manifestos de `base/` e nos pods rodando: são 14 manifestos, 10 deles pods de pé hoje): `appserver-core`, `appserver-rest`,
+  `appserver-telnet`, `appserver-upddistr-job`, `dbaccess`, `license`, `postgres`, `printer`, `smartview`,
+  `webagent`, `webapp`, `smartview-db-init-job` e os dois do manager **não têm `imagePullSecrets`**. Só os 3 seeds
+  e os Jobs `compile`/`worker` têm. `regcred` e `dockerhub-creds` existem; ❓ **não verifiquei se o `regcred` é
+  válido** (como os repos são públicos, ele nunca foi exercitado).
+- Ordem segura, se o usuário decidir: (1) validar o `regcred`; (2) adicionar `imagePullSecrets: regcred` a **todos**
+  os Deployments/Jobs que usam `rodrigomicrosiga/*`; (3) só então tornar privado (Docker Hub → Settings →
+  Visibility); (4) conferir pods e o Image Updater (`dockerhub-creds`). Fazer o passo 3 antes dos outros derruba o
+  ambiente na próxima recriação de pod. As imagens do manager não têm segredo (o token é de runtime).
+
+**0.2 ⚠️ `appserver-rest` e `appserver-telnet` estão PARADOS — de propósito, pelo usuário.**
+- ✅ `READY 0/0` nos dois. Auditoria da API + log do nginx: `POST …/appserver-telnet/stop` às **19:57:42 UTC** e
+  `…/appserver-rest/stop` às **19:57:51 UTC**, pela tela, com `User-Agent` `Chrome/154` comum (os meus testes
+  automatizados aparecem como `HeadlessChrome`, e nenhum deles clica em Parar no real). Foi o usuário testando.
+- ✅ Seguem parados ~7 min depois, sem o `selfHeal` desfazer: **prova real, feita por um humano num navegador, da
+  decisão do ADR 0019** (`replicas` fora do GitOps).
+- **Não religar sem perguntar.** Efeito prático: REST (8400/1235) e o console SIGAACD (23/1236) fora do ar. O
+  `core` (1234) e o SmartClient seguem de pé.
+
+**0.3 💬 Duas frentes de DISCUSSÃO — não implementar nada antes de decidir** (detalhe e perguntas na seção 6):
+**A)** serviço de atualização de artefatos; **B)** serviço de topologia por release (o `protheus-systemload-seed`
+é uma das peças, não a topologia inteira).
+
+### 1. Estado verificado ao vivo (✅)
+
+| Item | Estado conferido |
+|---|---|
+| Cluster | 2 nodes `Ready`; Argo CD `Synced`/`Healthy`; 13 pods `1/1` (15 Deployments; 2 com 0 réplicas, ver 0.2); **nenhum** pod fora de `Running`/`Completed` em nenhum namespace |
+| Portas em `127.0.0.1` (serverlb) | `23, 1234, 1235, 1236, 5432, 5555, 7017, 7019, 7890, 8020, 8400, 8800, 8801, 32033` (14). `8800 /health` → 200 (`0.4.0`); `8801 /healthz` → 200. A `32033` (monitor do core) o usuário optou por não testar |
+| Imagens do manager | API `protheus-manager-api-dev:0.4.0`, digest `dabb7d7acf57…` (Go); web `protheus-manager-web-dev:0.1.0`, digest `7663f85146cb…` |
+| Host | drop-in `docker.service.d/wait-data-mount.conf` instalado e `RequiresMountsFor=/media/rodrigo/dados` ativo; disco montado em `/dev/sda1`; `rshared` aplicado nos 2 nodes (`shared:665`/`shared:636`) — **mas** `k3d-node-rshared.service` está `inactive` (ver L3) |
+| Repositórios | os 4 com `HEAD == origin/develop` e árvore limpa: `k8s-protheus-devops-stack`, `protheus-manager-api` (`97d10aa`), `protheus-manager-web` (`b54f635`), `docker-protheus-devops-stack` (`3dead67`). Tag `python-final` no remoto da API |
+| Compose local | 7 containers `Exited` (há 2 semanas); `.env.protheus` com `HOST_BIND_IP=127.0.0.2` e `DBACCESS_HOST_PORT=7890`. **Nunca subiu** depois da mudança do ADR 0017 (L4) |
+| Backups | diários `Completed` (último 04/10 13:34 UTC); **3 `manual-*` criados pelos meus testes de hoje** (TTL 7 dias, expiram sozinhos) |
+| Token / cofre | `base/manager-secret.env` (local, `600`, gitignored) + `base/manager-secret.env.gpg` versionado (AES256; confirmado sem o token em texto). **O texto puro continua no disco** |
+| Sobras (não são do cluster) | Docker Hub: tag órfã `protheus-manager-api-dev:go-preview` e o repositório `protheus-manager-api-go-dev:preview` (**só o usuário apaga**, pela interface do Hub); volumes Docker `pm-gomod`/`pm-gocache` (cache de build do Go; podem ser removidos) |
+
+### 2. Mapa do que existe
+
+**Repositórios** (todos em `/media/rodrigo/dados/`; GitHub `rodrigomicrosiga-devops/…`, privados)
+- `k8s-protheus-devops-stack` — manifestos (`base/`), Argo CD (`argocd/`), scripts, ADRs, este HANDOFF. Manifestos do
+  manager: `base/protheus-manager.yaml` (SA + 3 Roles + Deployment + Service `NodePort 30880`),
+  `base/protheus-manager-web.yaml` (Deployment + Service `NodePort 30881`), `base/manager-secret.sealed.yaml`.
+- `protheus-manager-api` — **Go 1.25**. `cmd/manager`, `internal/{api,gate,audit,config,db}`,
+  `openapi/openapi.json` (**o contrato congelado**), `scripts/contract-check.sh` (**a régua**),
+  `docs/diagrams/render.mjs`. CI: `gofmt`+`vet`+`test`, build multi-stage → distroless, tag `0.4.0`.
+- `protheus-manager-web` — nginx + página estática (`site/`), proxy `/api` de mesma origem, CSP estrita;
+  `e2e/run.sh` (Chrome real), `docs/diagrams/render.mjs`. Tag `0.1.0`.
+- `docker-protheus-devops-stack` — Compose de referência (agora publica em `127.0.0.2`).
+- `docker-protheus-*` (16 repos, um por imagem) — origem das imagens; CI no runner self-hosted lê os artefatos
+  TOTVS do **disco do runner**, nunca do portal.
+
+**ADRs desta fase:** 0017 portas padrão do Protheus em `127.0.0.1` (Compose em `127.0.0.2`) · 0018 o Docker espera o
+disco de dados no boot · 0019 desenho do manager · 0020 frontend · 0021 API em Go.
+
+**Como falar com a API:** Swagger `http://127.0.0.1:8800/docs` (botão Authorize); tela `http://127.0.0.1:8801`;
+token: `export MANAGER_TOKEN=$(grep '^MANAGER_API_TOKEN=' base/manager-secret.env | cut -d= -f2)` (**nunca imprimir**).
+14 rotas em `/api/v1` (serviços, logs, stop/start/restart, `database/dictionary`, `gitops`, `backups`).
+
+### 3. Decisões fechadas (não reabrir sem motivo novo)
+- Ações **diretas no cluster**; `replicas` fora do GitOps (`ignoreDifferences` + `RespectIgnoreDifferences=true` no
+  `Application`); o `/gitops/sync` da API **sempre** manda essa opção (sync manual não herda do `syncPolicy`).
+- RBAC por ação: `scale` pela subresource (sem `patch` em Deployment), `restart` por `delete pods`, `resourceNames`
+  no Application e no Schedule; a API não para nem reinicia a si mesma.
+- **Portão do bootstrap** = presença de 36 tabelas obrigatórias, **falha fechada**, sem `force`.
+- Token Bearer; o frontend **repassa** o `Authorization` e **nunca** o injeta (injetar abriria CSRF); CSP estrita.
+- **API em Go**, contrato congelado em `openapi.json`. Retorno possível: imagem `0.3.0` (Python), tag `python-final`,
+  reverter o commit `456b74f` do cluster.
+- O cluster tem prioridade em `127.0.0.1`; o Compose fica em `127.0.0.2`.
+- Diagramas dos READMEs são **PNG gerados do próprio bloco Mermaid** (o visualizador do GitHub falhou ao renderizar o
+  Mermaid; a causa não foi reproduzida).
+
+### 4. Lacunas e itens não verificados (nada escondido)
+
+| # | Sev. | O que é | Estado |
+|---|---|---|---|
+| L1 | 🔴 | Imagens com conteúdo TOTVS públicas no Docker Hub | ✅ confirmado (0.1); decisão do usuário |
+| L2 | 🟠 | `run-job.sh` completo **nunca rodou com um Job real**. Só o portão e o par parar/restaurar foram exercitados, e este só no `telnet`. O fluxo `worker`/`compile`/`upddistr` com os AppServers pausados via `kubectl scale` (depois da migração do `lib.sh`) nunca foi visto ao vivo. Caso atual: rest/telnet com 0 réplicas — o `restore` restauraria 0 (correto, **não testado**) | ❓ |
+| L3 | 🟠 | `k3d-node-rshared.service` está `inactive` (oneshot sem ter rodado desde o `reset-failed`) e **nunca foi provado por reboot**; o ADR 0018 só foi validado por `systemd-analyze critical-chain`. O `rshared` de hoje foi aplicado à mão (`post-boot.sh`) | 🟡/❓ |
+| L4 | 🟡 | Coexistência Compose (`127.0.0.2`) × cluster (`127.0.0.1`) **nunca testada** | ❓ |
+| L5 | 🟠 | **Drill do zero com o manager nunca executado.** Risco achado por leitura: `base/protheus-manager.yaml` tem `Role`/`RoleBinding` no namespace `velero`, que só é criado no `04-install-extras.sh`, **depois** de o Argo CD já ter sincronizado o `base/` (`03`). No bootstrap do zero esses 2 recursos falham até o Velero existir; ❓ não verifiquei se o `selfHeal` converge sozinho depois. Correção possível, **não aplicada**: criar o namespace `velero` antes do `03` (no script), ou mover as Roles do Velero para o `04`. **Não** pôr o `Namespace velero` em `base/` (o `prune` poderia apagá-lo) | ❓ |
+| L6 | 🟠 | **Auditoria só no stdout do pod**: as linhas dos pods anteriores (API Python e Go antigos) se perderam nos rollouts; hoje só existe desde ~19:22 UTC. Pré-requisito da Fase 3 | ✅ conhecido |
+| L7 | 🟡 | Mermaid: verifiquei localmente que os blocos são válidos e renderizam em 4 versões, e conferi os PNG visualmente; **não vi a página renderizada no GitHub** | ❓ |
+| L8 | 🟡 | `contract-check.sh` e o E2E do frontend **não rodam na CI** (exigem cluster/Chrome). A checagem de sintaxe/render do Mermaid foi ad hoc: os scripts eram temporários e **não estão no repositório** | ✅ conhecido |
+| L9 | 🟡 | `required-sys-tables.txt` duplicado (cluster, para o shell; API, para o portão): regenerar nos dois se o Protheus mudar o dicionário | ✅ conhecido |
+| L10 | 🟡 | Token único e estático, sem rotação; a tela pede o token a cada aba | ✅ conhecido |
+| L11 | 🟢 | Diferenças aceitas Python→Go: 422 com `detail` em texto; 405 em texto simples (não JSON) | ✅ |
+| L12 | 🟡 | `appserver-core`/`dbaccess`/`license`… acumulam 19–33 restarts (12 dias, quedas e reboots); **não investiguei** se há causa além disso | ❓ |
+| L13 | 🟡 | Observação antiga **não investigada**: ciclo de reconexão `appserver-telnet` ↔ `license` a cada ~10 s no log do license. Reavaliar quando o telnet for religado | ❓ |
+| L14 | 🟠 | **Backlog herdado de 22/09, ainda aberto:** (a) item 2 — reaplicar ou não o `UPDDISTR` do pacote `EXPEDICAO_CONTINUA` (decisão do usuário, só depois de validar a stack); (b) item 4 — restore **real** sobre o cluster principal (só o drill em namespace descartável do ADR 0015 foi feito); (c) validação completa da stack: roteiro estruturado ou passo a passo (a pergunta nunca foi respondida); (d) `initialDelaySeconds` do probe do `appserver-rest` pode ser curto após bootstrap grande (observado em 20/09) | ❓ |
+| L15 | 🟡 | O **Image Updater casa o override pelo NOME da imagem** (já trocou uma prévia pelo digest de produção) e o cutover de versão tem **dois rollouts**. Vale para qualquer Deployment/Job novo que reuse um nome de imagem | ✅ conhecido |
+
+### 5. Pendências por dono
+
+**Usuário:** (a) decidir a visibilidade das imagens (L1); (b) decidir se religa `rest`/`telnet`; (c) rodar o Job real
+quando quiser (L2) — disparo dele, de propósito; (d) apagar as sobras no Docker Hub; (e) opcional: remover
+`base/manager-secret.env` do disco (a cópia cifrada recupera o token); (f) um reboot de prova do ADR 0018 (L3) quando
+for conveniente; (g) conferir os diagramas no GitHub (L7).
+
+**Assistente (próxima sessão):** seguir `docs/prompts/retomar-protheus-manager.md` — verificação de retomada →
+**discussão A e B (sem implementar)** → auditoria durável → Fase 3 → corrigir L5. Não fazer nada sobre L1/L2/L3 sem o
+usuário.
+
+### 6. Frentes de discussão (decidir ANTES de implementar)
+
+#### A. Serviço de atualização de artefatos
+**Premissa do usuário (2026-10-04):** tudo que for atualizado já precisa ter **imagem criada e publicada no Docker
+Hub**; acessar o portal da TOTVS diretamente não é possível/viável.
+
+**Fatos verificados que moldam o desenho**
+- *Classes de artefato:* (1) binários TOTVS, cada um numa imagem: `appserver` e `appserver-worker` `24.3.1.9`,
+  `dbaccess` `24.1.1.3`, `license` `3.7.2`, `webapp` `10.2.1`, `printer` `3.0.5`, `webagent` `1.1.1`, `smartview`
+  `3.9.0` (mais `postgres` `16`, `protheus-includes` `0.0.1`, `smartview-infra-tools` `1.0`); (2) os **3 seeds da
+  release `12.1.2510`** (`rpo`, `system`, `systemload`); (3) **estado que nenhuma imagem reconstrói**: `protheus-apo`
+  (RPO patcheado + `custom.rpo`), que muda por patch `.ptm` (Job `worker`) e compilação (Job `compile`); o dicionário
+  muda por `upddistr`; (4) includes, por um initContainer efêmero (ADR 0010).
+- *Como uma imagem nasce hoje:* 16 repos `docker-protheus-*`. O usuário baixa o pacote no portal e o coloca na raiz do
+  repo / no disco do runner; a CI self-hosted publica sob **tag fixa** (a tag só muda quando a TOTVS libera versão nova;
+  o mesmo build sob a mesma tag gera digest novo). Processo manual: `docs/prompts/atualizar-versao-binario-totvs.md` e
+  `docs/prompts/atualizar-tags-compose.md`.
+- *Como o cluster adota:* o Image Updater rastreia o **digest** sob a tag do alias (`argocd/image-updater.yaml`) e grava
+  um override em `Application.spec.source.kustomize.images` (`writeBackConfig: argocd`). Para trocar de **tag**: editar
+  `base/*.yaml` **e** o alias do `ImageUpdater` e rodar `kubectl apply -f argocd/image-updater.yaml` (README, seção
+  GitOps). O override casa por **nome** de imagem (L15) e a troca tem dois rollouts.
+- *Seeds:* marcador = release + revisão do build. O seed do **RPO nunca sobrescreve** um RPO de outra release: fica em
+  standby e exige migração manual deliberada (README de `docker-protheus-rpo`) — esse princípio tem que sobreviver a
+  qualquer automação. Os seeds `system`/`systemload` reprovisionam quando o marcador muda.
+- *Registro:* hoje tudo é público (L1), então a descoberta de tags funcionaria anônima; se o usuário tornar os repos
+  privados, a API precisaria de uma credencial do Hub (novo segredo) ou de reaproveitar a do Image Updater.
+
+**Perguntas abertas**
+- A1. **Escopo de "artefato":** só imagens (tag/digest)? ou também RPO/patches/dicionário (Fase 3: `worker`/`compile`/
+  `upddistr`)? E "atualizar o share" (webapp/printer/webagent; ADR 0019 em aberto): é *forçar o ciclo* (hoje já é
+  automático por digest) ou algo além?
+- A2. **Descoberta:** a API lista tags/digests no Docker Hub versus o que roda? Quem avisa que há versão nova?
+- A3. **Quem constrói a imagem:** só consumir o já publicado, ou a API dispara a CI (`workflow_dispatch` no GitHub →
+  token novo; o artefato continua entrando pelo disco do runner)?
+- A4. **Troca de versão** (pendência do ADR 0019): (i) alterar o `ImageUpdater` direto no cluster (sem histórico no git);
+  ou (ii) commitar nos 2 arquivos (credencial de escrita no git = segredo novo; mantém histórico). *Inclinação inicial:*
+  (i) se o usuário aceita o git deixar de registrar versões; senão (ii) com *deploy key* de escopo mínimo.
+- A5. **Segurança da atualização:** parar os AppServers? backup Velero antes (já existe sob demanda)? portão do
+  bootstrap? confirmação digitada na tela? rollback = voltar ao digest anterior (histórico do Argo CD)?
+- A6. **Matriz de compatibilidade** entre componentes: onde mora? (liga direto com B.)
+- A7. **Auditoria durável (L6) precisa existir antes** de qualquer ação que troque versão de binário.
+
+**Riscos já conhecidos:** trocar a imagem do `appserver` com o `core` em uso; seed do RPO em standby quando a release
+muda; digest novo sob a mesma tag (`imagePullPolicy: Always`); polling do Image Updater (~2 min); rate limit do Hub
+(`dockerhub-creds`); override por nome (L15).
+
+#### B. Serviço de topologia por release
+**Ideia do usuário:** criar uma topologia com base na versão/release desejada — "praticamente o `protheus-systemload-seed`".
+
+**Fatos verificados que moldam o desenho**
+- "Release" hoje = `12.1.2510`, a tag dos 3 seeds. As versões dos binários são **independentes** (tabela em A). A matriz
+  *release → versão de cada componente* **não existe em lugar nenhum do repo**: está na cabeça do usuário.
+- O `systemload-seed` **não é a topologia**: ele só entrega 3 pacotes (`dicionarios.zip`, `helps.zip`, `web.zip`) ao
+  volume `protheus-systemload`. Topologia = o conjunto de Deployments/Services/PVs/Jobs **mais** as versões. O seed é um
+  eixo da release, ao lado de `rpo` e `system`.
+- **Ambiente único hoje:** namespace `protheus-devops` fixo; 1 `Application` (`base/`, branch `develop`); **sem
+  overlays**; 11 PVs com nomes e caminhos fixos em `/media/rodrigo/dados/k8s-volume/<x>`; banco `protheus`; portas
+  padrão do Protheus em `127.0.0.1` (ADR 0017); `SealedSecret` preso a **nome + namespace** (escopo estrito); Image
+  Updater com **1 alias por nome de imagem** e override por nome ⇒ **duas topologias que usem a mesma imagem colidem no
+  override** (L15).
+- **Regras duras que continuam valendo:** base nova ⇒ bootstrap manual do usuário antes de `UPDDISTR`/`worker`/
+  `compile`; o seed do RPO nunca sobrescreve RPO de outra release; trocar de release com dados existentes é migração
+  deliberada (README de `docker-protheus-rpo`), com `upddistr` e backup antes.
+
+**Opções de "criar topologia" (a discutir)**
+- B1. **Trocar a release do ambiente único (in-place):** muda as tags dos 3 seeds (+ binários compatíveis). Exige o
+  procedimento manual do RPO. Valor alto, risco alto.
+- B2. **Ambiente paralelo por release (namespace próprio):** exige prefixar PVs e caminhos, deslocar portas (conflita com o
+  ADR 0017), outro banco, re-selar segredos, 2º `Application`/`ApplicationSet`, aliases do Image Updater **sem colisão
+  de nome**, e cabe na memória da máquina? Pede um ADR de isolamento multi-ambiente antes.
+- B3. **Só gerar (GitOps):** a API produz o diff/commit (um `overlays/<release>/` ou `releases/<release>.yaml`) para
+  revisão; não aplica nada. Menor risco; bom primeiro passo.
+- Peças comuns a qualquer opção: **catálogo de releases** versionado (matriz release → {componente: tag}); validação (as
+  imagens existem no Hub? digest?); dry-run/diff; confirmação; backup; rollback.
+
+**Perguntas abertas**
+- B-Q1. O que é "release" para o usuário: só `12.1.2510`, ou também as versões de binário que a acompanham?
+- B-Q2. In-place (B1), paralelo (B2) ou gerar (B3)? B-Q3. Onde mora o catálogo (git, ConfigMap, banco)?
+- B-Q4. Uso real: **testar uma release nova sem tocar a principal** (→ paralelo) ou **migrar a principal**?
+- B-Q5. Dados: base nova e vazia (bootstrap manual) ou **clone** da atual (restore do Velero noutro namespace; o ADR
+  0015 já ensaiou restore em namespace descartável)?
+- B-Q6. Limite de memória/CPU da máquina local para ter duas topologias de pé.
+
+*Inclinação inicial, sujeita à discussão:* começar por **B3 + A2** (catálogo e geração/diff + descoberta) antes de
+B1/B2, e tratar o isolamento multi-ambiente num ADR próprio. **A e B dependem do mesmo catálogo** (a matriz de
+compatibilidade): decidir o formato **uma vez**.
+
+### 7. Verificações rápidas ao retomar (todas somente leitura)
+```bash
+cd /media/rodrigo/dados/k8s-protheus-devops-stack
+kubectl get nodes; kubectl get applications -n argocd protheus-devops-stack     # Ready x2; Synced/Healthy
+kubectl get pods -n protheus-devops                                             # 13 pods 1/1 (rest/telnet em 0, ver 0.2)
+kubectl get deploy -n protheus-devops --no-headers | awk '$2 ~ /^0\//'          # esperado hoje: rest e telnet
+docker ps --filter name=serverlb --format '{{.Ports}}' | tr ',' '\n' | grep -c 127.0.0.1   # 14
+curl -s http://127.0.0.1:8800/health; curl -s http://127.0.0.1:8801/healthz     # 0.4.0 / ok
+kubectl get pod -n protheus-devops -l app=protheus-manager-api \
+  -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'                 # termina em sha256:dabb7d7a…
+kubectl exec deployment/postgres -n protheus-devops -- psql -U postgres -d protheus -tAc \
+  "select count(*) from information_schema.tables where table_schema='public'"  # 168
+for r in k8s-protheus-devops-stack protheus-manager-api protheus-manager-web docker-protheus-devops-stack; do
+  (cd ../$r && git fetch -q && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/develop)" ] && echo "$r ok" || echo "$r DIVERGE"); done
+# Régua do contrato (no repo da API; só leitura, 46 checks):
+#   export MANAGER_TOKEN=$(grep '^MANAGER_API_TOKEN=' base/manager-secret.env | cut -d= -f2)
+#   (cd ../protheus-manager-api && scripts/contract-check.sh)
+# Visibilidade das imagens (L1) — HEAD anônimo, não baixa camada:
+#   tok=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:rodrigomicrosiga/appserver-dev:pull" | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
+#   curl -sI -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $tok" -H "Accept: application/vnd.oci.image.index.v1+json" https://registry-1.docker.io/v2/rodrigomicrosiga/appserver-dev/manifests/24.3.1.9
+```
+
+### 8. Regras permanentes (resumo; o texto completo está no `CLAUDE.md`)
+- Bootstrap manual do AppServer antes de `UPDDISTR`/`worker`/`compile` (regra dura). Comandos destrutivos (`rm`, wipe,
+  `DROP`) o **usuário** roda via `!`; commits **sem** trailer de IA.
+- **Conferir o artefato real, não o status:** `imageID` (digest) e a versão no `/health` depois de qualquer rollout; testar
+  no ambiente real. O ambiente local e os fakes já mentiram 5 vezes (ADRs 0019–0021).
+- Nunca imprimir o token nem credenciais; carregar em variável (`grep`/`cut`).
+- Escrever o HANDOFF como **uma seção consolidada e atual**, depois de reconferir ao vivo — não empilhar cronologia.
+
+## Histórico condensado da sessão de 2026-10-04 (tarde) — queda de energia, manager, frontend, migração para Go
+
+> **Cronologia escrita ao longo do dia; está VENCIDA em vários pontos. Onde divergir da seção "Onde paramos"
+> logo acima, aquela manda.** Exemplos do que mudou depois: a API não é mais FastAPI (é Go, `0.4.0`); as
+> portas 8800 e 8801 já estão publicadas; o token já está no cofre; o manager existe e está no ar.
 
 **Queda de energia**: o disco de dados montou depois do Docker (fstab com `nofail`; `systemd-fsck`
 levou ~20s), os nodes do k3d ficaram com o bind mount do `k8s-volume` apontando pra pasta vazia do
@@ -15,8 +261,8 @@ pods `1/1`, 168 tabelas. **Correção de causa raiz**: ADR 0018 (`RequiresMounts
 critical-chain docker.service` confirma Docker depois do mount. **Falta**: prova por reboot real.
 Sinal de mount tardio: node sem `postgres`/`protheus-apo` em `/media/rodrigo/dados/k8s-volume`.
 
-**Manager (ideia do usuário, nada criado ainda; desenho fechado no ADR 0019)**: decidido 1 backend (`protheus-manager-api`,
-FastAPI/Swagger) + 1 frontend (`protheus-manager-web`). Usuário quer ações direto no cluster, não
+**Manager (ideia do usuário, nada criado ainda; desenho fechado no ADR 0019)** *[hoje existe e está no ar]*: decidido 1 backend (`protheus-manager-api`,
+FastAPI/Swagger *[depois migrado para Go, ADR 0021]*) + 1 frontend (`protheus-manager-web`). Usuário quer ações direto no cluster, não
 via GitOps. Ponto a fechar em ADR antes do repo: o `selfHeal` reverte o que o Argo CD possui
 (replicas, tag de imagem). Proposta: replicas via `ignoreDifferences`; Jobs `upddistr`/`compile`/
 `worker`, backup Velero, restart e leitura já ficam fora do Argo CD; troca de versão de imagem é
@@ -40,7 +286,7 @@ RBAC só de leitura verificado nos dois sentidos), 14 serviços, `bootstrap_comp
 README completo nos dois repos. Achado: o cliente `kubernetes` 36 devolve `str(bytes)` nos logs — os
 fakes não pegaram, só o cluster real (ver ADR).
 
-**Pendente do usuário (2 comandos)**:
+**Pendente do usuário (2 comandos)** — ✅ *feitos depois (8800 publicada; `.gpg` do token no cofre)*:
 1. `k3d cluster edit protheus-cluster --port-add "127.0.0.1:8800:30880@loadbalancer"` (recria o
    `serverlb`, ~20s) — até lá a API só é acessível por `kubectl port-forward`.
 2. `./scripts/secrets/encrypt.sh base/manager-secret.env` (pede a passphrase do cofre) e commitar o
@@ -59,7 +305,7 @@ contra a API real pelo pod implantado: 15 serviços, bootstrap 36/36, zero viola
 Achados (no ADR): CI falhou por Node 26 vs 18; **upstream do nginx precisa ser FQDN** (resolver não usa
 o `search`); a tela acusava o Kubernetes por um 502 do proxy; `type: module` quebrou a API falsa.
 
-**Pendente do usuário**: `k3d cluster edit protheus-cluster --port-add "127.0.0.1:8801:30881@loadbalancer"`
+**Pendente do usuário** — ✅ *feito depois (8801 publicada e respondendo 200)*: `k3d cluster edit protheus-cluster --port-add "127.0.0.1:8801:30881@loadbalancer"`
 (até lá a tela só por `kubectl port-forward -n protheus-devops svc/protheus-manager-web-service 8801:8080`).
 
 **API migrada para Go e em produção** (ADR 0021): `protheus-manager-api` `0.4.0`, digest `dabb7d7a…`,

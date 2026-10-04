@@ -70,4 +70,6 @@ Kubernetes), ele tivesse prioridade sobre o Compose local em caso de disputa de 
 `127.0.0.1:8800 -> NodePort 30880` entra no mesmo esquema (ADR 0019). Não é porta padrão do
 Protheus, então não há colisão possível com o Compose; vale só para o cluster. Está em
 `00-create-cluster.sh` (drills do zero); no cluster vivo é um `k3d cluster edit --port-add
-"127.0.0.1:8800:30880@loadbalancer"`.
+"127.0.0.1:8800:30880@loadbalancer"`. O frontend do manager entra igual: `127.0.0.1:8801 -> NodePort
+30881` (ADR 0020). **Ambas estão publicadas no cluster vivo** (verificado em 2026-10-04: 14 portas em
+`127.0.0.1` no `serverlb`, `8800` e `8801` respondendo 200).

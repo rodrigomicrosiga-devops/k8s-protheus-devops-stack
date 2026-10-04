@@ -20,6 +20,12 @@ qualquer coisa. Decisões arquiteturais validadas estão em [`docs/adr/`](docs/a
   Docker Hub (`rodrigomicrosiga/<nome>-dev`), cada um com seu próprio CI.
 - **`/media/rodrigo/dados/totvs-protheus-modern-devops`**: predecessor monolítico, histórico,
   desatualizado — não usar como referência de estado atual.
+- **`/media/rodrigo/dados/protheus-manager-api`** (Go) e **`/media/rodrigo/dados/protheus-manager-web`**
+  (nginx + página estática): o *Protheus Manager*, repos próprios (privados no GitHub, org
+  `rodrigomicrosiga-devops`). A API opera o cluster (ver ADRs 0019/0020/0021 aqui); manifestos ficam
+  **neste** repo (`base/protheus-manager*.yaml`). Swagger `http://127.0.0.1:8800/docs`, tela
+  `http://127.0.0.1:8801`. O token da API fica em `base/manager-secret.env` (local, gitignored,
+  `chmod 600`) — **nunca imprimir**; carregar com `grep`/`cut` direto numa variável.
 
 ## Caminhos de dados — não confundir
 
@@ -64,6 +70,16 @@ causou a poluição de 30/07.
   senha sem escaping numa `ConnectionString` delimitada por `;` (via `sed`) no `dbaccess.ini`.
 - Escopo de banco no cluster: **só Postgres**. MSSQL/Oracle ficam exclusivos do Compose local
   (decisão registrada em `docs/adr/`).
+
+## Regras que valem sempre ao mexer no manager e no cluster
+
+- **Confira o artefato real, não o status.** Depois de subir ou trocar um workload, olhe o `imageID`
+  (digest) do pod e a versão no `/health`; o Image Updater casa o override pelo **nome** da imagem e já
+  trocou uma prévia pela imagem de produção. Fakes e ambiente local já mentiram 5 vezes (ver os ADRs 0019, 0020 e 0021).
+- **Não religue o que o usuário parou.** `appserver-rest`/`appserver-telnet` podem estar com 0 réplicas
+  de propósito (a auditoria da API diz quem e quando). Pergunte antes de `start`.
+- **Mudança de contrato da API começa no `openapi/openapi.json`** (repo da API) e passa na régua
+  `scripts/contract-check.sh` antes de trocar a imagem de produção.
 
 ## Commits
 
