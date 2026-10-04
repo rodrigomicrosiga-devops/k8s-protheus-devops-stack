@@ -196,6 +196,43 @@ Achados desta etapa:
 Ainda **não** feito: publicação em `127.0.0.1:8800` pelo `serverlb` (depende de um
 `k3d cluster edit --port-add` do usuário) e o token no cofre GPG (`encrypt.sh` pede a passphrase).
 
+## Fase 2 — escrita de baixo risco implantada (2026-10-04)
+API `0.3.0`: `POST /services/{name}/stop|start|restart`, `GET /gitops`, `POST /gitops/sync|refresh`,
+`GET/POST /backups`, e auditoria (uma linha JSON por ação no stdout do pod).
+Validado ao vivo pela própria API, contra o cluster real, com token:
+- **stop** do `appserver-telnet` ficou parado >75 s (o `selfHeal` não desfez), idempotente
+  (`changed:false` na 2ª chamada);
+- **`/gitops/sync` com o telnet parado**: sync `Succeeded` com `syncOptions=[RespectIgnoreDifferences=true]`
+  e `initiatedBy=protheus-manager-api`; o telnet foi reaplicado (`configured`) e **continuou em 0
+  réplicas**. É a prova de ponta a ponta da decisão do item 3;
+- **start** voltou o telnet a `running`; **restart** do `printer` trocou o pod;
+- **serviço protegido** (a própria API) recusado com 409; sync com outro em andamento, 409;
+- **backup sob demanda**: `Completed`, 391/391 itens, 0 erros, ~2 min; o `protheus.dump` (317 MB)
+  foi regravado dentro da janela do backup, ou seja, o hook de `pg_dump` rodou;
+- **RBAC por ação** verificado nos dois sentidos nos 3 namespaces (ver README da API).
+
+Decisões de implementação:
+1. **`scale` pela subresource, sem `patch` em `deployments`**; **`restart` por `delete pods`**.
+   RBAC do Kubernetes não filtra por campo: `patch` em Deployment deixaria trocar imagem, env e
+   volumes. Menor privilégio por ação, não por recurso.
+2. **`resourceNames`** no Application (`get`/`patch`) e no Schedule do Velero. `list` não aceita
+   `resourceNames`, e a API não lista Applications.
+3. **Serviço protegido** (`MANAGER_PROTECTED_SERVICES`, padrão a própria API): parar o que
+   controla tudo tiraria o controle.
+4. O backup manual **copia o template** do Schedule `protheus-daily` em vez de duplicar a
+   configuração (namespaces, TTL, local).
+5. Risco aceito: `patch` no Application permite, em tese, alterar o spec dele. Mitigado por ser um
+   único Application (`resourceNames`) e por nenhuma rota fazer isso.
+
+Achado da Fase 2: **corrida no `restart`**. Logo depois de um `stop` o pod ainda existe
+(`Terminating`) e a primeira versão respondia 200 "reiniciando" um serviço parado. Os testes
+unitários passaram; só o teste contra o cluster real expôs (segunda vez que isso acontece — ver a
+lição dos logs na Fase 1). Corrigido recusando pelo estado desejado (`replicas=0`) e ignorando pods
+já em término, com dois testes de regressão.
+
+**Pendência conhecida**: a auditoria está só no stdout do pod, que não é armazenamento durável.
+É **pré-requisito da Fase 3**; decidir o destino (volume próprio ou serviço) antes dela.
+
 ## Em aberto (não decidido aqui, de propósito)
 1. **Troca de versão de imagem** (Fase 3). Hoje o Image Updater rastreia por **digest** sob tag
    fixa, e a troca de tag exige editar `base/*.yaml` **e** `argocd/image-updater.yaml` e reaplicar

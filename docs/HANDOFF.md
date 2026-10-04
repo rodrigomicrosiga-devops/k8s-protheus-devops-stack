@@ -46,10 +46,15 @@ fakes não pegaram, só o cluster real (ver ADR).
 2. `./scripts/secrets/encrypt.sh base/manager-secret.env` (pede a passphrase do cofre) e commitar o
    `.gpg`; o `.env` em texto puro é local (`chmod 600`, gitignored) e é de onde sai o token.
 
-**Próximo**: Fase 2 da API (escrita de baixo risco: stop/start, restart, sync com
-`RespectIgnoreDifferences=true`, backup Velero). Exige ampliar a Role (`deployments/scale`,
-`patch`) e decidir a leitura do Argo CD (Role em `argocd`). Em paralelo, decisões do frontend (CORS/
-proxy, stack) listadas no README do `protheus-manager-web`.
+**Fase 2 da API implantada e validada ao vivo pela própria API** (ADR 0019, seção "Fase 2"): stop/start/
+restart, `/gitops/sync` (com `RespectIgnoreDifferences=true` — provado com o telnet parado), backups
+sob demanda (391/391, 0 erros), auditoria em stdout, RBAC por ação verificado, 63 testes, README com
+roteiro de validação pelo Swagger. Achado: corrida no `restart` (pod `Terminating`), pega só no
+cluster real; corrigida com regressão. **Pendência**: auditoria durável (pré-requisito da Fase 3).
+
+**Próximo, na ordem que o usuário definiu**: (1) ✅ Fase 2; (2) decisões do frontend (CORS/proxy,
+stack — README do `protheus-manager-web`); (3) rodar um Job real (`worker`/`compile`/`upddistr`) pelo
+`run-job.sh`, que ainda não foi executado completo — decisão e disparo do usuário.
 
 ## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017
 
