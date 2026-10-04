@@ -45,7 +45,9 @@ no objetivo de carreira do projeto, e o usuário já mantém um cliente em Go (`
 | | Python 0.3.0 | Go 0.4.0 |
 |---|---|---|
 | Régua de contrato (somente leitura) | 46/46 | 46/46 (local e no cluster) |
-| Régua completa no cluster (mutante + backup real) | — | **66/66** (após 1 correção, ver achado 5) |
+| Régua completa no cluster, prévia (mutante + backup real) | — | **66/66** (após 1 correção, ver achado 5) |
+| Régua mutante em produção, pelo caminho real (serverlb → NodePort → Service → pod), sem backup | — | **62/62** |
+| Tela (Chrome real, via proxy) contra a API Go | — | 15 serviços, bootstrap 36/36, 0 violações de CSP |
 | Memória do pod | 89 MiB | **5–7 MiB** |
 | Imagem | ~150 MB, com shell | **52 MB**, sem shell |
 | Testes | 63 | 82 (62 funções + subtestes), 14/14 mutantes pegos |

@@ -62,18 +62,26 @@ o `search`); a tela acusava o Kubernetes por um 502 do proxy; `type: module` que
 **Pendente do usuário**: `k3d cluster edit protheus-cluster --port-add "127.0.0.1:8801:30881@loadbalancer"`
 (até lá a tela só por `kubectl port-forward -n protheus-devops svc/protheus-manager-web-service 8801:8080`).
 
-**Pergunta em aberto do usuário**: migrar a API para **Go**? Respondido: viável e recomendado, mas como
-fase própria **antes da Fase 3** (o código de Jobs é o mais arriscado; escrevê-lo uma vez na linguagem
-final), mesma repo/branch, contrato `/api/v1` congelado, trocar a imagem só depois de repetir ao vivo os
-cenários já validados. Decisão do usuário pendente. Sem `go` no host (build via `golang:1.23-alpine`).
+**API migrada para Go e em produção** (ADR 0021): `protheus-manager-api` `0.4.0`, digest `dabb7d7a…`,
+mesmo contrato `/api/v1` (congelado em `openapi/openapi.json`), distroless (52 MB, sem shell), **5–7 MiB**
+de memória contra 89 MiB do Python, 82 testes e 14/14 mutantes pegos. Medida pela **mesma régua
+caixa-preta** (`scripts/contract-check.sh`) em todas as etapas: Python 46/46 → Go local 46/46 → Go no
+cluster (prévia, mesma ServiceAccount) 66/66 após 1 correção → produção 62/62. A tela segue funcionando
+sem mudança. **Retorno**: imagem `0.3.0` (Python) continua publicada e o código está na tag `python-final`
+do repo da API; reverter o commit `456b74f` do cluster.
+Achados (todos no ADR 0021): `client-go` v0.37 exige Go 1.26 (fixado v0.35); um mutante sobrevivente
+(`restart` com replicas=0 e pod vivo); bug no `-healthcheck`; **o Image Updater casa o override pelo NOME
+da imagem e trocou a prévia pelo digest Python** (validei olhando o digest do pod); janela no guard do
+sync (a fase ainda mostra a anterior em t+1s — vale `.operation` ou `Running`; o Python tinha a mesma);
+**o cutover tem dois rollouts** (manifesto e depois override) — confirmar pelo digest.
 
 **Observação não investigada**: o log do `license` mostra, a cada ~10 s, o IP/porta do
 `appserver-telnet` (`:1236`) conectando e desconectando, com `FAILED TO NOTIFY THREAD RELEASE`.
 Parece um ciclo de reconexão de licença do telnet; não se sabe se é antigo nem se importa.
 
 **Próximo**: (3) rodar um Job real (`worker`/`compile`/`upddistr`) pelo `run-job.sh`, que ainda não foi
-executado completo — decisão e disparo do usuário. Depois: decidir Go, e a auditoria durável antes da
-Fase 3.
+executado completo — decisão e disparo do usuário. Depois: a auditoria durável, e então a Fase 3 da API
+(já direto em Go).
 
 ## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017
 
