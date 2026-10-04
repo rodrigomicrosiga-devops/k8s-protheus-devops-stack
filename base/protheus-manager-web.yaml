@@ -30,8 +30,11 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            # FQDN, não o nome curto: o `resolver` do nginx NÃO aplica os domínios de busca do
+            # resolv.conf, então `protheus-manager-api-service` dava "Host not found" (502).
+            # Achado só no cluster; o DNS do Docker aceita o nome curto e escondeu o erro.
             - name: API_UPSTREAM
-              value: protheus-manager-api-service:8800
+              value: protheus-manager-api-service.protheus-devops.svc.cluster.local:8800
             # CoreDNS do k3s (ClusterIP padrão do kube-dns). O nginx resolve o upstream a cada
             # requisição, então precisa saber qual DNS usar.
             - name: DNS_RESOLVER
