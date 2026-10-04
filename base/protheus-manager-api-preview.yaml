@@ -1,6 +1,9 @@
 # TEMPORÁRIO (ADR 0021): a versão Go da API rodando AO LADO da Python, só para validar ao vivo com a
 # MESMA ServiceAccount (logo, o mesmo RBAC) antes da troca. Sem Service, sem NodePort: acesso por
 # `kubectl port-forward deployment/protheus-manager-api-preview`. Removido no cutover.
+#
+# A imagem tem OUTRO NOME (protheus-manager-api-go-dev) de propósito: o override do Image Updater
+# casa pelo nome da imagem e trocaria esta prévia pelo digest da API Python em produção.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,7 +27,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: protheus-manager-api-preview
-          image: rodrigomicrosiga/protheus-manager-api-dev:go-preview
+          image: rodrigomicrosiga/protheus-manager-api-go-dev:preview
           imagePullPolicy: Always
           ports:
             - containerPort: 8800
