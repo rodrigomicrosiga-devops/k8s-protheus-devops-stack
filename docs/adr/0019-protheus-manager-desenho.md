@@ -1,0 +1,146 @@
+# ADR 0019 — Desenho do `protheus-manager` (API + web): ações diretas no cluster, GitOps só onde o Argo CD é dono
+
+## Status
+Proposto em 2026-10-04, decisões de desenho aceitas pelo usuário na mesma sessão. **Nada foi
+implementado**: nenhum repositório criado, `argocd/application.yaml` ainda sem `ignoreDifferences`.
+A implementação começa pela Fase 0 abaixo.
+
+## Contexto
+O usuário quer operar o ambiente Protheus do cluster sem ficar em terminal: consultar serviços,
+parar/subir, atualizar artefatos, rodar `upddistr`/`compile`/`worker`, fazer deploy, entre outras
+ações. Premissa dele: **tudo o que o manager opera já tem imagem publicada no Docker Hub** (a
+TOTVS não é acessada direto), então o manager nunca baixa binário de portal.
+
+Duas tensões reais já documentadas neste repo moldam o desenho:
+
+1. **`selfHeal: true` desfaz ação direta** (`argocd/application.yaml`). `kubectl scale` ou `k9s`
+   voltam ao valor do git em segundos. Hoje `scripts/appserver-patch/lib.sh` contorna isso
+   **commitando `replicas: 0` e `replicas: N` no git** a cada `worker`/`compile`/`upddistr`
+   (`stop_appservers`/`restore_appservers`, `set_replicas_in_git` + `git_commit_and_push`):
+   dois commits de história por execução, pushes de um script local, e dependência de credencial de
+   git na máquina.
+2. **O gate do bootstrap manual é a regra mais cara do projeto** (`CLAUDE.md`, incidente de
+   2026-07-30). O gate atual, `check_bootstrap_done`, só exige **ao menos uma** tabela `sys_%` —
+   passa com dicionário parcial (o incidente de 20/09 teve 53 de 81 tabelas base e travou o login).
+
+A alternativa de `ignoreDifferences` em `/spec/replicas` foi levantada na sessão de 2026-10-04
+(dúvida sobre parar `rest`/`telnet` pelo k9s) e ficou registrada no HANDOFF sem decisão. Esta ADR a toma.
+
+## Decisão
+
+### 1. Estrutura: um backend, um frontend, repositórios separados
+- **`protheus-manager-api`** — único backend, com todas as ações (infra e Protheus). Swagger/
+  OpenAPI gerado do código (FastAPI é a proposta; a escolha de linguagem fica para a Fase 0).
+- **`protheus-manager-web`** — só interface, consome a API. Sem lógica de cluster.
+- Descartado: dois backends (`-services` para status/start/stop e `-api` para operações Protheus).
+  `compile`/`upddistr`/`worker` já **dependem** de parar/subir serviço; dois backends obrigariam um
+  a reimplementar o outro ou a chamá-lo por HTTP.
+
+### 2. Regra de quem muda o quê: depende de quem é dono do campo
+A premissa "tudo parte de uma imagem" diz de **onde vem o artefato**, não de **quem reconcilia o
+estado**. O critério é: *o Argo CD vai reverter isso?*
+
+| Ação | Caminho | Por quê |
+|---|---|---|
+| Parar/subir serviço existente (`replicas`) | **Direto no cluster** | `ignoreDifferences` em `/spec/replicas` (ver 3) tira o campo da reconciliação |
+| `worker` / `compile` / `upddistr` (Jobs) | **Direto no cluster** | Jobs ficam **fora** do Kustomize de propósito (`base/kustomization.yaml`); o Argo CD não os possui nem reverte |
+| Backup sob demanda (Velero), `rollout restart`, sync/refresh do Argo CD | **Direto no cluster** | Não alteram nada que o git declare |
+| Ler status, logs, contagem de tabelas, health | **Direto no cluster (leitura)** | — |
+| Trocar versão/tag de imagem de um componente | **Decisão adiada** (Fase 3) | Altera campo que o Argo CD possui; ver "Em aberto" |
+| Criar recurso novo (Deployment, Service, PV...) | **GitOps (git → Argo CD)** | É declaração de infraestrutura, não operação |
+
+Consequência prática: a primeira versão da API **não precisa de credencial de escrita no git**.
+Só a Fase 3 pode vir a precisar.
+
+### 3. `ignoreDifferences` em `/spec/replicas` — e `RespectIgnoreDifferences=true`
+Em `argocd/application.yaml`, para os Deployments operáveis pelo manager (`appserver-core`,
+`appserver-rest`, `appserver-telnet`, e os demais que a API listar):
+
+- `ignoreDifferences` em `/spec/replicas` (`group: apps`, `kind: Deployment`);
+- `syncOptions: RespectIgnoreDifferences=true`.
+
+O **segundo** item é o que costuma ficar de fora: sem ele, o `selfHeal` deixa de reverter, mas
+qualquer *sync* disparado por outro motivo (um digest novo do Image Updater, um commit qualquer)
+reaplica o `replicas` do git por cima e religa o que o manager parou. Aplicar as duas coisas
+juntas é parte da decisão, não detalhe.
+
+Efeito colateral aceito: `replicas` em `base/*.yaml` passa a ser **valor inicial**, não estado
+desejado vivo. O git deixa de ser fonte única da verdade para esse campo (e só esse).
+
+O `scripts/appserver-patch/lib.sh` deve ser migrado para o mesmo mecanismo (ver Fase 1): o manager
+passa a pausar/restaurar via API do Kubernetes, e o script deixa de gerar commits.
+
+### 4. Reuso, não reescrita
+A lógica de `scripts/appserver-patch/run-job.sh`/`lib.sh` (pausar core/rest/telnet → aplicar Job →
+veredito por arquivo → restaurar, mesmo em falha) é a especificação da esteira. A API a reimplementa
+na linguagem escolhida **mantendo as decisões já provadas**: `upddistr` nunca termina sozinho e o
+status do Job não é confiável (ADR 0009, o veredito é o conteúdo de `Result.json`), e a restauração
+roda sempre, também em falha. As consultas de saúde seguem as já padronizadas no HANDOFF
+(`Synced`/`Healthy`, 13 pods `1/1`, contagem de tabelas).
+
+### 5. O gate do bootstrap é imposto pela API, e mais forte que o atual
+- `worker`/`compile`/`upddistr` **nunca** são disparados por evento (ex.: "core subiu"): só por
+  chamada explícita de uma pessoa autenticada.
+- O gate da API não repete o `>= 1`. Exige um dicionário **completo**: contagem de `sys_%` igual
+  ou acima de um piso definido na configuração da API (proposta inicial: o piso observado como
+  dicionário padrão completo neste ambiente — a Fase 1 mede o valor real antes de fixá-lo). Abaixo
+  disso, a API **recusa** a ação, com a razão no corpo da resposta; não há parâmetro `force`.
+- O mesmo gate vale para quem rodar `run-job.sh` à mão: a Fase 1 alinha `check_bootstrap_done` ao
+  novo critério, para script e API não divergirem.
+- A API **não** executa o bootstrap manual nem sinaliza "pronto": validar banco, dbaccess e
+  definir o usuário inicial seguem sendo passos do usuário (`CLAUDE.md`).
+
+### 6. Segurança: mínimo viável proporcional ao ambiente
+Ambiente de dev, usuário único, mas uma API que derruba o AppServer é um nível de poder diferente
+de um script manual:
+- **Autenticação por token** guardado como `SealedSecret` (mesmo padrão do `postgres-secret`,
+  ADR 0011). OIDC/SSO fica fora da v1.
+- **ServiceAccount dedicada com Role no namespace `protheus-devops`**, nunca `cluster-admin`.
+  Direitos mínimos por fase (leitura; `deployments/scale`; `jobs` create/delete; `pods/exec` só se a
+  leitura de tabelas exigir). Acesso ao Velero e ao Argo CD, em namespaces próprios, por Roles
+  separadas e só quando a fase precisar.
+- Escuta apenas em `127.0.0.1` do host, pela mesma via do ADR 0017; nada exposto na rede.
+- Toda ação mutável gera um registro auditável (quem, o quê, quando, resultado). Sem trilha de
+  commits no git para as ações diretas, o log da API é a única trilha — precisa persistir.
+- Ações destrutivas ou de maior risco (`upddistr`, `compile`, `worker`) exigem confirmação
+  explícita na requisição e pedem ao frontend um passo de confirmação na interface.
+
+### 7. Faseamento
+- **Fase 0** — decisões de implementação (linguagem, onde roda: Deployment no cluster com Image
+  Updater, como o resto da frota, ou processo local), esqueleto dos dois repositórios, ADR curto
+  se a escolha divergir daqui.
+- **Fase 1** — **somente leitura**: status, saúde, logs (o log do AppServer vem com padding `\0`,
+  descartar com `tr -d '\000'` ou equivalente antes de devolver), contagem de tabelas. Em paralelo:
+  `ignoreDifferences` + `RespectIgnoreDifferences` no `Application` e migração de `lib.sh`.
+- **Fase 2** — escrita de baixo risco e idempotente: scale (start/stop), `rollout restart`,
+  sync/refresh do Argo CD, backup sob demanda do Velero.
+- **Fase 3** — Jobs de risco (`worker`/`compile`/`upddistr`) com o gate do item 5, e a decisão da
+  troca de versão de imagem.
+- Cada fase termina com **validação ao vivo**, não só testes: padrão do projeto desde as ADRs 0015
+  e 0016.
+
+## Em aberto (não decidido aqui, de propósito)
+1. **Troca de versão de imagem** (Fase 3). Hoje o Image Updater rastreia por **digest** sob tag
+   fixa, e a troca de tag exige editar `base/*.yaml` **e** `argocd/image-updater.yaml` e reaplicar
+   (README, seção GitOps). Duas rotas: a API altera o `ImageUpdater` direto no cluster (sem git,
+   sem estado versionado) **ou** commita nos dois arquivos (exige credencial de git na API, o novo
+   segredo que a v1 evita). A escolha depende de quanto o usuário quer que o git continue
+   registrando versões. Decidir antes de começar a Fase 3.
+2. **"Atualizar o share"** (volumes de `webapp`/`printer`/`webagent`). Hoje os três seeds já se
+   atualizam por digest via Image Updater. Falta saber se a ação desejada é *forçar* o ciclo
+   (rollout restart do seed e do consumidor) ou algo além disso — a corrida conhecida do
+   `webagent` (ADR 0014) já se resolve com `rollout restart` de core/rest/telnet.
+3. **Linguagem e local de execução** (Fase 0).
+4. **Piso exato do gate de tabelas** (medido na Fase 1).
+
+## Consequências
+- Operar o ambiente deixa de gerar commits de `replicas` (hoje dois por execução de Job); o
+  histórico do git volta a conter só mudanças de infraestrutura.
+- O git deixa de ser a fonte única da verdade para `replicas`. Quem olhar só `base/*.yaml` para
+  saber quantas réplicas rodam estará errado; a fonte passa a ser o cluster (e o log da API).
+- A v1 da API não guarda segredo de git; a superfície de segredo nova é só o token da própria API.
+- O gate de bootstrap passa a ser código testável, não só convenção — e mais rígido que o do
+  script atual. É custo deliberado: o incidente de 30/07 e o dicionário parcial de 20/09 mostraram
+  que o gate fraco não protege.
+- Dois repositórios novos para manter (API e web), cada um com CI e imagem próprios no Docker
+  Hub, no mesmo padrão dos `docker-protheus-*`.

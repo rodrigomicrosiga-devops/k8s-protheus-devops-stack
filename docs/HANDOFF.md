@@ -15,7 +15,7 @@ pods `1/1`, 168 tabelas. **Correção de causa raiz**: ADR 0018 (`RequiresMounts
 critical-chain docker.service` confirma Docker depois do mount. **Falta**: prova por reboot real.
 Sinal de mount tardio: node sem `postgres`/`protheus-apo` em `/media/rodrigo/dados/k8s-volume`.
 
-**Manager (ideia do usuário, nada criado ainda)**: decidido 1 backend (`protheus-manager-api`,
+**Manager (ideia do usuário, nada criado ainda; desenho fechado no ADR 0019)**: decidido 1 backend (`protheus-manager-api`,
 FastAPI/Swagger) + 1 frontend (`protheus-manager-web`). Usuário quer ações direto no cluster, não
 via GitOps. Ponto a fechar em ADR antes do repo: o `selfHeal` reverte o que o Argo CD possui
 (replicas, tag de imagem). Proposta: replicas via `ignoreDifferences`; Jobs `upddistr`/`compile`/
