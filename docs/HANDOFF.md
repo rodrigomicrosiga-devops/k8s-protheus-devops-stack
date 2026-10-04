@@ -34,10 +34,22 @@ com `ignoreDifferences` em `/spec/replicas` + `RespectIgnoreDifferences=true` (a
 `syncOptions` na operação reverte `replicas` — a API precisa mandar `RespectIgnoreDifferences=true`.
 `run-job.sh` completo ainda **não** foi rodado com um Job real.
 
-**Próximo**: rotas de leitura da API (status, saúde, logs, contagem de tabelas), Deployment da
-API no cluster com ServiceAccount de Role mínima e SealedSecret do token, exposição em
-`127.0.0.1` (NodePort + serverlb, como o ADR 0017), e como a API lê o veredito do `upddistr`
-(provável PVC `protheus-systemload` somente leitura).
+**Fase 1 da API implantada e validada ao vivo** (ADR 0019, seção "Fase 1 — API de leitura implantada"):
+`protheus-manager-api` `0.2.0` rodando no cluster (`base/protheus-manager.yaml`, SealedSecret do token,
+RBAC só de leitura verificado nos dois sentidos), 14 serviços, `bootstrap_complete: true`, 31 testes,
+README completo nos dois repos. Achado: o cliente `kubernetes` 36 devolve `str(bytes)` nos logs — os
+fakes não pegaram, só o cluster real (ver ADR).
+
+**Pendente do usuário (2 comandos)**:
+1. `k3d cluster edit protheus-cluster --port-add "127.0.0.1:8800:30880@loadbalancer"` (recria o
+   `serverlb`, ~20s) — até lá a API só é acessível por `kubectl port-forward`.
+2. `./scripts/secrets/encrypt.sh base/manager-secret.env` (pede a passphrase do cofre) e commitar o
+   `.gpg`; o `.env` em texto puro é local (`chmod 600`, gitignored) e é de onde sai o token.
+
+**Próximo**: Fase 2 da API (escrita de baixo risco: stop/start, restart, sync com
+`RespectIgnoreDifferences=true`, backup Velero). Exige ampliar a Role (`deployments/scale`,
+`patch`) e decidir a leitura do Argo CD (Role em `argocd`). Em paralelo, decisões do frontend (CORS/
+proxy, stack) listadas no README do `protheus-manager-web`.
 
 ## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017
 

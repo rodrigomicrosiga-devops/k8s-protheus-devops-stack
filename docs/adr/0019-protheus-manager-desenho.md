@@ -170,6 +170,32 @@ não existem.
 5. Os `README`s e o comentário do `appserver-worker-job.yaml` que diziam "commitar `replicas: 0`"
    foram atualizados; o ADR 0009 descreve a orquestração original e fica como registro histórico.
 
+## Fase 1 — API de leitura implantada (2026-10-04)
+Rotas `GET /api/v1/services[/{name}[/logs]]` e `GET /api/v1/database/dictionary`, token Bearer, no
+repo `protheus-manager-api` `0.2.0`; manifesto em `base/protheus-manager.yaml`.
+Validado ao vivo, dentro do cluster (túnel temporário, token não impresso):
+- pod `1/1` sem restart, uid `10001`, 14 serviços listados, `bootstrap_complete: true`
+  (36/36 tabelas), logs reais, 401 sem token e com token errado;
+- **RBAC verificado com `kubectl auth can-i --as=` nos dois sentidos**: lê `deployments`, `pods` e
+  `pods/log` no namespace; **nega** `patch deployments`, `deployments/scale`, `delete pods`,
+  `create jobs`, `get secrets`, `create pods/exec` e qualquer coisa em `kube-system`/`argocd`.
+- O Image Updater já resolveu o digest da imagem da API (entrada nova em `argocd/image-updater.yaml`).
+
+Achados desta etapa:
+1. **O cliente `kubernetes` 36 devolve `str(bytes)` literal nos logs** (`"b'...\\n'"`). Os testes
+   com fakes passaram; só rodar contra o cluster real expôs. Corrigido com `_preload_content=False`
+   e o fake passou a imitar o cliente real. Regra: fake que diverge da biblioteca dá confiança
+   falsa — validar sempre também no ambiente real.
+2. **Banco fora do ar viraria 500 com a mensagem do driver**, que pode ecoar o DSN com a senha.
+   Agora é `503` com só o tipo do erro, com teste.
+3. A leitura de logs cobre só **stdout**. O arquivo de log do AppServer (padding `\0`) exigiria
+   `pods/exec`, fora da Role mínima; fica para quando houver motivo para ampliá-la.
+4. **Leitura do Argo CD (Application) ficou de fora**: exigiria Role em outro namespace (`argocd`).
+   Decidir junto com a Fase 2, que precisa dele para o sync.
+
+Ainda **não** feito: publicação em `127.0.0.1:8800` pelo `serverlb` (depende de um
+`k3d cluster edit --port-add` do usuário) e o token no cofre GPG (`encrypt.sh` pede a passphrase).
+
 ## Em aberto (não decidido aqui, de propósito)
 1. **Troca de versão de imagem** (Fase 3). Hoje o Image Updater rastreia por **digest** sob tag
    fixa, e a troca de tag exige editar `base/*.yaml` **e** `argocd/image-updater.yaml` e reaplicar

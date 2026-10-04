@@ -65,3 +65,9 @@ Kubernetes), ele tivesse prioridade sobre o Compose local em caso de disputa de 
   não um serviço de rede.
 - Qualquer script/doc futuro que assuma `172.18.0.x` ou "precisa de port-forward" como único
   caminho está desatualizado — ver `docs/HANDOFF.md` e `README.md` para as referências corrigidas.
+
+## Acréscimo — 2026-10-04: porta 8800 (protheus-manager-api)
+`127.0.0.1:8800 -> NodePort 30880` entra no mesmo esquema (ADR 0019). Não é porta padrão do
+Protheus, então não há colisão possível com o Compose; vale só para o cluster. Está em
+`00-create-cluster.sh` (drills do zero); no cluster vivo é um `k3d cluster edit --port-add
+"127.0.0.1:8800:30880@loadbalancer"`.
