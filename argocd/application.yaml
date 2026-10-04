@@ -18,3 +18,15 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=false
+      # Sem esta opção o ignoreDifferences abaixo só silencia o selfHeal: qualquer
+      # sync disparado por outro motivo (digest novo do Image Updater, commit) reaplica
+      # o `replicas` do git e religa o que foi parado. Ver ADR 0019, item 3.
+      - RespectIgnoreDifferences=true
+  # `replicas` dos Deployments é do operador (k9s, scripts/appserver-patch, futuro
+  # protheus-manager-api), não do git -- `base/*.yaml` guarda só o valor inicial.
+  # Sem isso, o selfHeal reverte qualquer scale em segundos. Ver ADR 0019.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

@@ -3,11 +3,11 @@
 #
 # DELIBERADAMENTE FORA de base/kustomization.yaml: este Job nunca deve ser
 # aplicado automaticamente pelo sync do Argo CD.
-#   1. selfHeal:true sem ignoreDifferences na Application reverteria qualquer
-#      scale-to-zero de core/rest/telnet feito por fora do git -- por isso a
-#      parada deles tem que ser via commit (replicas: 0) + sync, nunca
-#      `kubectl scale` direto (ver docs/adr/0006, e a prática real de
-#      2026-09-16 registrada no HANDOFF).
+#   1. (Histórico) até 2026-10-04 o selfHeal revertia qualquer scale-to-zero de
+#      core/rest/telnet feito por fora do git, então a parada era commit
+#      (replicas: 0) + sync. Hoje a Application ignora /spec/replicas
+#      (ADR 0019) e scripts/appserver-patch/lib.sh usa `kubectl scale` direto.
+#      O motivo 2 abaixo, sozinho, já mantém este Job fora do Kustomize.
 #   2. Hooks Argo CD (PreSync/PostSync) re-rodam a cada sync (ADR 0003),
 #      inclusive syncs disparados pelo Image Updater -- incompatível com a
 #      regra mais cara do projeto (CLAUDE.md): worker/compile/upddistr NUNCA

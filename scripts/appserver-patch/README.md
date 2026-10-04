@@ -12,12 +12,13 @@ completo).
 O texto original do backlog (`docs/HANDOFF.md`) cogitava "hooks Argo CD PreSync/PostSync fazendo
 `scale`". Não funciona neste repo:
 
-1. A `Application` tem `selfHeal: true` e `prune: true`, **sem `ignoreDifferences`**
-   (`argocd/application.yaml`). Um `kubectl scale --replicas=0` feito de dentro de um hook seria
-   revertido pelo próprio Argo CD no sync seguinte — exatamente o cenário de corrupção
-   concorrente do `.rpo` que a parada existe pra evitar. O precedente real do repo (ADR 0006, e a
-   pausa do `dbaccess` em 2026-09-16) é **`replicas: 0` commitado no git**, nunca `kubectl scale`
-   direto — é isso que `lib.sh` faz.
+1. A parada de `core`/`rest`/`telnet` precisa valer durante o Job. **Até 2026-10-04** a
+   `Application` não tinha `ignoreDifferences`, então um `kubectl scale` era revertido pelo
+   `selfHeal` e a parada era `replicas: 0` commitado no git (dois commits por execução). **Desde
+   2026-10-04** a `Application` ignora `/spec/replicas` dos Deployments (`ignoreDifferences` +
+   `RespectIgnoreDifferences=true`, ADR 0019) e `lib.sh` usa `kubectl scale` direto, sem commit.
+   Ainda assim isto não vira hook: um scale feito de dentro de um hook de sync disputaria com o
+   próprio sync, e o motivo 2 abaixo continua valendo.
 2. Hooks re-rodam a cada sync (ADR 0003), inclusive syncs disparados pelo Image Updater — e a
    regra mais cara do projeto (`CLAUDE.md`) é que `worker`/`compile`/`upddistr` **nunca** rodam
    antes do bootstrap manual do AppServer estar completo. Um Job automático e recorrente é
@@ -62,11 +63,13 @@ docker exec k3d-protheus-cluster-agent-0 ls -la /totvs/protheus/patches_queue 2>
 ```
 
 O script:
-1. Confere que o bootstrap manual do AppServer já foi concluído (tabelas `SYS_*` existem) —
-   recusa rodar se não. Regra dura, não é opcional.
-2. Captura quantas réplicas `appserver-core`/`-rest`/`-telnet` têm agora, edita os três
-   manifestos pra `replicas: 0` só nos que estavam ativos, commita, dá push, espera o Argo CD
-   sincronizar e os pods sumirem de verdade (`scale` é assíncrono — só editar o git não basta).
+1. Confere que o bootstrap manual do AppServer já foi concluído: cada tabela de
+   `required-sys-tables.txt` (famílias `SYS_GRP_*`, `SYS_RULES*`, `SYS_USR*`, `SYS_COMPANY*`) tem
+   que existir — recusa rodar se faltar qualquer uma, ou se a própria lista estiver ausente/vazia
+   (falha fechada). Antes bastava uma única `SYS_*`, o que passava com o dicionário parcial de
+   20/09. Regra dura, não é opcional, sem `--force`.
+2. Captura quantas réplicas `appserver-core`/`-rest`/`-telnet` têm agora, faz `kubectl scale` pra
+   0 só nos que estavam ativos e espera os pods sumirem de verdade (`scale` é assíncrono).
 3. Aplica o Job (`kubectl apply -f base/appserver-<role>-job.yaml`).
    - `worker`/`compile`: espera o Job terminar e usa `status.succeeded`/`status.failed` como
      veredito (o exit code do container reflete o resultado real nesses dois papéis).

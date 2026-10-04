@@ -81,10 +81,12 @@ roda sempre, também em falha. As consultas de saúde seguem as já padronizadas
 ### 5. O gate do bootstrap é imposto pela API, e mais forte que o atual
 - `worker`/`compile`/`upddistr` **nunca** são disparados por evento (ex.: "core subiu"): só por
   chamada explícita de uma pessoa autenticada.
-- O gate da API não repete o `>= 1`. Exige um dicionário **completo**: contagem de `sys_%` igual
-  ou acima de um piso definido na configuração da API (proposta inicial: o piso observado como
-  dicionário padrão completo neste ambiente — a Fase 1 mede o valor real antes de fixá-lo). Abaixo
-  disso, a API **recusa** a ação, com a razão no corpo da resposta; não há parâmetro `force`.
+- O gate da API não repete o `>= 1`. Exige a **presença de cada tabela** de uma lista de
+  obrigatórias (famílias `SYS_GRP_*`, `SYS_RULES*`, `SYS_USR*`, `SYS_COMPANY*`, as que faltaram no
+  incidente de 20/09). Se faltar qualquer uma, ou se a própria lista estiver ausente/vazia (falha
+  fechada), a API **recusa** a ação, com a razão no corpo da resposta; não há parâmetro `force`.
+  (A proposta inicial era um piso numérico de `sys_%`; a Fase 1 mostrou que seria um chute — ver
+  "Fase 1 — achados".)
 - O mesmo gate vale para quem rodar `run-job.sh` à mão: a Fase 1 alinha `check_bootstrap_done` ao
   novo critério, para script e API não divergirem.
 - A API **não** executa o bootstrap manual nem sinaliza "pronto": validar banco, dbaccess e
@@ -135,6 +137,39 @@ Esqueleto criado localmente em `/media/rodrigo/dados/protheus-manager-api` e
   `lib.sh` usa `docker exec` no node, que um pod não tem — provável montagem do PVC
   `protheus-systemload` somente leitura), e a porta/NodePort de exposição em `127.0.0.1`.
 
+## Fase 1 — achados (2026-10-04, parte neste repo)
+Feito e validado ao vivo: `ignoreDifferences` + `RespectIgnoreDifferences=true` no `Application`
+(aplicado), `scripts/appserver-patch/lib.sh` migrado, gate novo. As rotas de leitura da API ainda
+não existem.
+
+1. **`RespectIgnoreDifferences` só vale no sync automático, ou no manual que o declare.** Testado
+   no `appserver-telnet` com `replicas` fora do valor do git:
+   - `selfHeal`/auto-sync (drift provocado em `strategy.type`, campo presente no git): `replicas`
+     **mantido**. É o caminho do Image Updater, o que importa.
+   - sync manual criado por `operation.sync` **sem** `syncOptions`: `replicas` **revertido** para o
+     valor do git (`deployment.apps/... configured`), com `replicas=0` e também com `2`.
+   - o mesmo sync manual **com** `syncOptions: ["RespectIgnoreDifferences=true"]` na operação:
+     `replicas` mantido.
+   Um sync manual não herda os `syncOptions` do `syncPolicy`. **Consequência para a Fase 2**: a
+   ação "sync" da API tem que mandar `RespectIgnoreDifferences=true` em toda operação; sem isso um
+   clique em "sincronizar" religa tudo o que foi parado. O mesmo vale para quem sincronizar pelo
+   CLI/UI do Argo CD (a UI pré-marca a opção; confira).
+2. **Gate: lista de presença em vez de piso numérico.** O `sys_%` de uma base saudável hoje tem 52
+   tabelas (total 168); o "53 de 81" do incidente era outra métrica (tabelas do dicionário base),
+   então um piso de `sys_%` não teria base. `scripts/appserver-patch/required-sys-tables.txt`
+   (36 tabelas das famílias acima, geradas da base que funciona) é a fonte única; a API deve
+   embarcar a mesma lista (ConfigMap ou cópia versionada). Se o Protheus mudar o dicionário num
+   patch, a lista precisa ser regenerada conscientemente — é o custo de não ter `force`.
+3. **Bug achado e corrigido na hora, antes de qualquer commit**: a primeira versão do gate
+   **falhava aberta** — com a lista ilegível, `missing` ficava vazio e o gate passava. Descoberto
+   pelo teste negativo; agora recusa se a lista estiver ausente ou vazia. Testados 4 casos
+   (saudável, tabela faltando, lista vazia, lista inexistente) e os códigos de saída.
+4. `stop_appservers`/`restore_appservers` via `kubectl scale`, testados ao vivo só no `telnet`
+   (para não derrubar o core). `run-job.sh` completo **não** foi executado: rodar um Job real
+   (`worker`/`compile`/`upddistr`) fica para uma execução deliberada do usuário.
+5. Os `README`s e o comentário do `appserver-worker-job.yaml` que diziam "commitar `replicas: 0`"
+   foram atualizados; o ADR 0009 descreve a orquestração original e fica como registro histórico.
+
 ## Em aberto (não decidido aqui, de propósito)
 1. **Troca de versão de imagem** (Fase 3). Hoje o Image Updater rastreia por **digest** sob tag
    fixa, e a troca de tag exige editar `base/*.yaml` **e** `argocd/image-updater.yaml` e reaplicar
@@ -147,7 +182,7 @@ Esqueleto criado localmente em `/media/rodrigo/dados/protheus-manager-api` e
    (rollout restart do seed e do consumidor) ou algo além disso — a corrida conhecida do
    `webagent` (ADR 0014) já se resolve com `rollout restart` de core/rest/telnet.
 3. **Linguagem e local de execução** (Fase 0).
-4. **Piso exato do gate de tabelas** (medido na Fase 1).
+4. ~~Piso exato do gate de tabelas~~ — resolvido na Fase 1: o gate virou lista de presença.
 
 ## Consequências
 - Operar o ambiente deixa de gerar commits de `replicas` (hoje dois por execução de Job); o

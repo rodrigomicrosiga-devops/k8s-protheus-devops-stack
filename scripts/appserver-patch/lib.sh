@@ -7,7 +7,8 @@ NAMESPACE="protheus-devops"
 ARGOCD_NAMESPACE="argocd"
 ARGOCD_APP="protheus-devops-stack"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SCRIPT_DIR_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR_LIB}/../.." && pwd)"
 
 # Node k3d onde os PVs hostPath estão fixados (nodeAffinity) -- usado pro
 # upddistr, cujo veredito de sucesso/falha vem do CONTEÚDO de um arquivo no
@@ -20,59 +21,48 @@ SYSTEMLOAD_HOSTPATH="/media/rodrigo/dados/k8s-volume/protheus-systemload"
 # réplicas antes do Job rodar. Ordem importa na restauração (core primeiro,
 # igual ao run.sh do Compose).
 APPSERVER_DEPLOYS=(appserver-core appserver-rest appserver-telnet)
-declare -A APPSERVER_FILES=(
-  [appserver-core]="$REPO_ROOT/base/appserver-core.yaml"
-  [appserver-rest]="$REPO_ROOT/base/appserver-rest.yaml"
-  [appserver-telnet]="$REPO_ROOT/base/appserver-telnet.yaml"
-)
 
 # Portão de segurança: a regra mais cara do projeto (CLAUDE.md) é que
 # worker/compile/upddistr NUNCA rodam antes do bootstrap manual do AppServer
-# estar completo. Em vez de confiar só em documentação, checa de verdade se
-# as tabelas SYS_* já existem -- é o mesmo sinal usado nesta sessão pra
-# confirmar que o bootstrap não foi reaberto.
+# estar completo. Em vez de confiar só em documentação, checa de verdade o banco.
+# Antes (até 2026-10-04) bastava UMA tabela SYS_* -- passava com o dicionário
+# parcial de 20/09 (28 tabelas faltando, login travado). Agora exige a PRESENÇA
+# de cada tabela listada em required-sys-tables.txt (ADR 0019, item 5). Sem
+# --force: se faltar, o bootstrap não está completo.
+REQUIRED_TABLES_FILE="${SCRIPT_DIR_LIB}/required-sys-tables.txt"
+
 check_bootstrap_done() {
-  local count
-  count=$(kubectl exec -n "$NAMESPACE" deploy/postgres -- \
-    psql -U protheus -d protheus -tAc \
-    "SELECT count(*) FROM pg_tables WHERE tablename ILIKE 'sys_%';" 2>/dev/null || echo "0")
-  if [ "${count:-0}" -lt 1 ] 2>/dev/null; then
-    echo "ERRO: nenhuma tabela SYS_* encontrada no banco 'protheus'." >&2
-    echo "Isso significa que o bootstrap manual do AppServer (ver CLAUDE.md) ainda" >&2
-    echo "não foi concluído. worker/compile/upddistr NUNCA rodam antes disso --" >&2
-    echo "violar essa regra já poluiu o banco uma vez (2026-07-30, ver docs/HANDOFF.md)." >&2
+  local present missing required
+  # Falha FECHADA: sem a lista de tabelas obrigatórias legível e não vazia, o gate
+  # não tem como validar nada -- recusar, nunca deixar passar por "nada faltando".
+  required=$(grep -vE '^(#|$)' "$REQUIRED_TABLES_FILE" 2>/dev/null || true)
+  if [ -z "$required" ]; then
+    echo "ERRO: lista de tabelas obrigatórias ausente ou vazia: $REQUIRED_TABLES_FILE" >&2
+    echo "Sem ela o portão do bootstrap não consegue validar o dicionário -- recusando." >&2
     return 1
   fi
-  echo "Bootstrap confirmado: $count tabelas SYS_* presentes."
+  present=$(kubectl exec -n "$NAMESPACE" deploy/postgres -- \
+    psql -U protheus -d protheus -tAc \
+    "SELECT lower(tablename) FROM pg_tables WHERE tablename ILIKE 'sys\\_%';" 2>/dev/null || true)
+  if [ -z "$present" ]; then
+    echo "ERRO: nenhuma tabela SYS_* encontrada no banco 'protheus' (ou o banco não respondeu)." >&2
+    echo "O bootstrap manual do AppServer (ver CLAUDE.md) ainda não foi concluído." >&2
+    echo "worker/compile/upddistr NUNCA rodam antes disso -- violar essa regra já poluiu" >&2
+    echo "o banco uma vez (2026-07-30, ver docs/HANDOFF.md)." >&2
+    return 1
+  fi
+  missing=$(grep -vxFf <(printf '%s\n' "$present") <<<"$required" || true)
+  if [ -n "$missing" ]; then
+    echo "ERRO: dicionário incompleto -- faltam $(wc -l <<<"$missing") tabela(s) obrigatória(s):" >&2
+    sed 's/^/  - /' <<<"$missing" >&2
+    echo "Bootstrap manual não concluído (ou dicionário criado pela metade, ADR 0006)." >&2
+    return 1
+  fi
+  echo "Bootstrap confirmado: $(wc -l <<<"$required") tabelas obrigatórias presentes."
 }
 
 get_replicas() {
   kubectl get deploy "$1" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}' 2>/dev/null || echo "0"
-}
-
-set_replicas_in_git() {
-  local deploy="$1" n="$2"
-  local file="${APPSERVER_FILES[$deploy]}"
-  sed -i "s/^  replicas: [0-9]\+/  replicas: $n/" "$file"
-}
-
-git_commit_and_push() {
-  local msg="$1"
-  cd "$REPO_ROOT"
-  if git diff --quiet -- base/; then
-    echo "Nada mudou em base/ -- pulando commit."
-    return 0
-  fi
-  git add base/appserver-core.yaml base/appserver-rest.yaml base/appserver-telnet.yaml
-  git commit -m "$msg"
-  git push origin "$(git rev-parse --abbrev-ref HEAD)"
-}
-
-# Acelera o polling padrão do Argo CD (pode levar minutos) -- mesma técnica
-# usada ao vivo nesta sessão para a Fase D e o image-updater.
-refresh_argocd() {
-  kubectl patch application "$ARGOCD_APP" -n "$ARGOCD_NAMESPACE" --type merge \
-    -p '{"metadata":{"annotations":{"argocd.argoproj.io/refresh":"hard"}}}' >/dev/null
 }
 
 wait_for_pods_gone() {
@@ -105,51 +95,41 @@ wait_for_pods_ready() {
   done
 }
 
-# Para os appservers que estavam ativos (replicas > 0), commitando e
-# empurrando pro git -- nunca `kubectl scale` direto (o Argo CD selfHeal
-# desfaria no sync seguinte, ver comentário em base/appserver-worker-job.yaml).
+# Para os appservers que estavam ativos (replicas > 0) com `kubectl scale`
+# direto. Funciona porque o Application ignora /spec/replicas de Deployments
+# (ignoreDifferences + RespectIgnoreDifferences, ADR 0019 e argocd/application.yaml)
+# -- até 2026-10-04 isto commitava `replicas: 0` e `replicas: N` no git (dois
+# commits por execução) porque o selfHeal revertia qualquer scale direto.
 stop_appservers() {
   declare -gA ORIGINAL_REPLICAS=()
-  local any_changed=0
   for d in "${APPSERVER_DEPLOYS[@]}"; do
     local current
     current="$(get_replicas "$d")"
     ORIGINAL_REPLICAS[$d]="$current"
     if [ "$current" != "0" ]; then
       echo "Parando $d (estava com $current réplica(s))..."
-      set_replicas_in_git "$d" 0
-      any_changed=1
+      kubectl scale deploy "$d" -n "$NAMESPACE" --replicas=0 >/dev/null
     fi
   done
-  if [ "$any_changed" -eq 1 ]; then
-    git_commit_and_push "chore: Fase E -- pausa appserver-core/rest/telnet pra patch/compile"
-    refresh_argocd
-    for d in "${APPSERVER_DEPLOYS[@]}"; do
-      [ "${ORIGINAL_REPLICAS[$d]}" != "0" ] && wait_for_pods_gone "$d"
-    done
-  fi
+  for d in "${APPSERVER_DEPLOYS[@]}"; do
+    [ "${ORIGINAL_REPLICAS[$d]}" != "0" ] && wait_for_pods_gone "$d"
+  done
   echo "Isolamento do .rpo confirmado -- nenhum appserver-core/rest/telnet ativo."
 }
 
 # Restaura exatamente o que estava ativo antes -- roda mesmo se o Job falhou
 # (mesma ordem do run.sh: restaura antes de propagar o erro).
 restore_appservers() {
-  local any_changed=0
   for d in "${APPSERVER_DEPLOYS[@]}"; do
     local want="${ORIGINAL_REPLICAS[$d]:-1}"
     if [ "$want" != "0" ]; then
       echo "Restaurando $d pra $want réplica(s)..."
-      set_replicas_in_git "$d" "$want"
-      any_changed=1
+      kubectl scale deploy "$d" -n "$NAMESPACE" --replicas="$want" >/dev/null
     fi
   done
-  if [ "$any_changed" -eq 1 ]; then
-    git_commit_and_push "chore: Fase E -- restaura appserver-core/rest/telnet pós patch/compile"
-    refresh_argocd
-    for d in "${APPSERVER_DEPLOYS[@]}"; do
-      [ "${ORIGINAL_REPLICAS[$d]:-1}" != "0" ] && wait_for_pods_ready "$d"
-    done
-  fi
+  for d in "${APPSERVER_DEPLOYS[@]}"; do
+    [ "${ORIGINAL_REPLICAS[$d]:-1}" != "0" ] && wait_for_pods_ready "$d"
+  done
 }
 
 # --- upddistr: veredito lido direto do bind mount do host, não do Job ---

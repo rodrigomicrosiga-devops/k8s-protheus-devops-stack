@@ -22,12 +22,22 @@ via GitOps. Ponto a fechar em ADR antes do repo: o `selfHeal` reverte o que o Ar
 `worker`, backup Velero, restart e leitura já ficam fora do Argo CD; troca de versão de imagem é
 a única que ainda exige decisão (override do Image Updater ou commit).
 
-**Fase 0 do manager feita (local, não publicada)**: `/media/rodrigo/dados/protheus-manager-api`
-(FastAPI, `/health` + Swagger, Dockerfile, CI, 2 testes, imagem validada) e
-`/media/rodrigo/dados/protheus-manager-web` (placeholder). Sem remoto no GitHub e sem secrets do
-Docker Hub ainda. **Próximo**: Fase 1 — `ignoreDifferences`+`RespectIgnoreDifferences` no
-`Application`, migrar `lib.sh`, medir o piso do gate de tabelas, rotas de leitura. Regra dura do `CLAUDE.md`
-(bootstrap manual) deve ser imposta pela API, não só documentada.
+**Fase 0 do manager feita e publicada**: repos privados `rodrigomicrosiga-devops/protheus-manager-api`
+(FastAPI, `/health` + Swagger, Dockerfile, CI, 2 testes) e `protheus-manager-web` (placeholder),
+secrets do Docker Hub criados pelo usuário. Os repos nasceram com um "Initial commit" do GitHub;
+meus commits foram reaplicados por cima (rebase), push sem `--force`.
+
+**Fase 1, parte deste repo, feita e validada ao vivo** (detalhe e achados no ADR 0019): `Application`
+com `ignoreDifferences` em `/spec/replicas` + `RespectIgnoreDifferences=true` (aplicado);
+`lib.sh` pausa/restaura com `kubectl scale`, sem commits; gate de bootstrap por lista de presença
+(`required-sys-tables.txt`), falha fechada. **Pegadinha para a Fase 2**: sync manual sem
+`syncOptions` na operação reverte `replicas` — a API precisa mandar `RespectIgnoreDifferences=true`.
+`run-job.sh` completo ainda **não** foi rodado com um Job real.
+
+**Próximo**: rotas de leitura da API (status, saúde, logs, contagem de tabelas), Deployment da
+API no cluster com ServiceAccount de Role mínima e SealedSecret do token, exposição em
+`127.0.0.1` (NodePort + serverlb, como o ADR 0017), e como a API lê o veredito do `upddistr`
+(provável PVC `protheus-systemload` somente leitura).
 
 ## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017
 

@@ -157,7 +157,7 @@ detalhe completo do porquê em [`scripts/sigaacd-client/README.md`](scripts/siga
 
 7. Patches, compilação e atualização de dicionário sob demanda (`worker`/`compile`/`upddistr`)
 
-Os três papéis do `run.sh` do Compose (linhas 148-215) foram portados para o cluster como Jobs (`base/appserver-worker-job.yaml`, `-compile-job.yaml`, `-upddistr-job.yaml`), mas ficam **deliberadamente fora de `base/kustomization.yaml`** — o Argo CD nunca os toca sozinho (hooks `PreSync` re-rodam a cada sync, incompatível com a regra acima). São disparados só via script, que pausa `core`/`rest`/`telnet` (`replicas: 0` commitado no git, nunca `kubectl scale` direto — o Argo CD desfaria), aplica o Job, espera o veredito e restaura o que estava ativo:
+Os três papéis do `run.sh` do Compose (linhas 148-215) foram portados para o cluster como Jobs (`base/appserver-worker-job.yaml`, `-compile-job.yaml`, `-upddistr-job.yaml`), mas ficam **deliberadamente fora de `base/kustomization.yaml`** — o Argo CD nunca os toca sozinho (hooks `PreSync` re-rodam a cada sync, incompatível com a regra acima). São disparados só via script, que pausa `core`/`rest`/`telnet` (`kubectl scale` direto — a `Application` ignora `/spec/replicas` desde o ADR 0019, então o Argo CD não desfaz e nenhum commit é gerado), aplica o Job, espera o veredito e restaura o que estava ativo:
 
 ```bash
 ./scripts/appserver-patch/run-job.sh worker    # aplica .ptm depositado em protheus-patches/

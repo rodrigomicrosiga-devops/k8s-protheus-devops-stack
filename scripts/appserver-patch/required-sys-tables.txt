@@ -1,0 +1,40 @@
+# Tabelas que um dicionário COMPLETO do Protheus tem e um parcial não tem (ADR 0019, item 5).
+# Fonte: base saudável deste ambiente em 2026-10-04 (login e SmartClient funcionando, 168 tabelas).
+# Famílias SYS_GRP_*, SYS_RULES*, SYS_USR* e SYS_COMPANY*: as que faltaram no incidente de 20/09
+# (28 tabelas ausentes travaram o login). Uma tabela por linha, minúsculas.
+sys_company
+sys_company_cfg
+sys_company_cfgit
+sys_grp_access
+sys_grp_accrestric
+sys_grp_acessib
+sys_grp_filial
+sys_grp_group
+sys_grp_module
+sys_grp_paneis
+sys_grp_printer
+sys_grp_work_paper
+sys_rules
+sys_rules_buttons
+sys_rules_features
+sys_rules_grp_glo
+sys_rules_grp_rules
+sys_rules_transact
+sys_rules_usr_glo
+sys_rules_usr_rules
+sys_usr
+sys_usr_access
+sys_usr_accrestric
+sys_usr_acessib
+sys_usr_filial
+sys_usr_groups
+sys_usr_logcfg
+sys_usr_login
+sys_usr_module
+sys_usr_oauth
+sys_usr_paneis
+sys_usr_paper
+sys_usr_printer
+sys_usr_ssignon
+sys_usr_super
+sys_usr_vincfunc
