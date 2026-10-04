@@ -58,23 +58,32 @@ Detalhe completo, alternativas descartadas e consequências em
   com o `port-forward`/`2323` documentado como plano B explícito nos dois READMEs e nos
   docstrings/comentários dos dois clientes.
 
-**Pendente nesta sessão, ainda não executado**: a aplicação ao vivo no cluster atual
-(`k3d cluster edit protheus-cluster --port-add ...`, recria o `serverlb`) e a parte B no repo
-irmão `docker-protheus-devops-stack` (Compose pra `127.0.0.2` via `HOST_BIND_IP`, `dbaccess` de
-volta a `7890` no host). Nenhum commit/push feito ainda nesta sessão — ver seção "Próximo passo".
+**Aplicado e validado ao vivo de ponta a ponta, não só render/manifesto**: commits `bb23c3e`
+(este repo) e `3dead67` (`docker-protheus-devops-stack`), push dos dois feito sem bloqueio do
+classificador. Argo CD refletiu o `postgres-service` `NodePort` em segundos (`kubectl patch
+--type merge` com anotação `argocd.argoproj.io/refresh: hard`, sem esperar o poll normal).
+Usuário rodou `k3d cluster edit protheus-cluster --port-add ...` (as 12 portas, um comando só,
+na ordem certa — Postgres já era `NodePort 30432` antes de editar o serverlb). Resultado:
+`k3d-protheus-cluster-serverlb` recriado limpo (renomeado → novo → velho apagado, sem downtime
+visível nos 13 pods), `docker ps` confirma as 12 portas em `127.0.0.1` (`1234`, `32033`, `1235`,
+`8400`, `1236`, `23`, `7890`, `5555`, `8020`, `7019`, `7017`, `5432`). **Sem nenhum
+`port-forward` ativo**: `webapp` (`301 → /webapp/`), REST (`200`), smartview (`200`), e as 9
+portas TCP puras (dbaccess/telnet/license/postgres/monitor) respondendo via `nc -z`. 168 tabelas
+intactas, 0 restart novo nos pods, 2 nodes `Ready`, Argo CD `Synced`/`Healthy`.
+
+**Não verificado ainda**: login real via SmartClient desktop em `127.0.0.1:1234` (só a URL web
+foi testada via `curl`) e DBMonitor/psql de fato conectando (TCP aberto confirmado, handshake de
+aplicação não — faltou cliente `psql` no host pra testar direto; `kubectl exec` segue confiável
+pra consulta interna). Convivência com o Compose local (`127.0.0.2`) também não testada ainda —
+o Compose não foi erguido nesta sessão.
 
 ### Próximo passo ao retomar
-1. Commitar as mudanças deste repo (sem trailer de IA).
-2. Editar `docker-protheus-devops-stack` (parte B do ADR 0017: `HOST_BIND_IP=127.0.0.2`,
-   `DBACCESS_HOST_PORT` de volta a `7890`).
-3. Usuário roda `k3d cluster edit protheus-cluster --port-add ...` (as 12 portas, um comando só)
-   **depois** do sync do Argo CD que tornar o Postgres `NodePort` — senão o mapeamento de 5432
-   aponta pra um NodePort que ainda não existe.
-4. Validar ao vivo sem nenhum `port-forward` ativo: webapp, DBMonitor, psql, SIGAACD
-   (`scripts/sigaacd-client`), REST, smartview — lista completa no ADR 0017.
-5. Usuário trouxe uma ideia de API própria para atualizar o ambiente — ainda não detalhada,
-   retomar depois de fechar o ADR 0017 ao vivo.
-6. Depois disso, retomar a validação completa da stack (item 2/backlog, ver histórico abaixo) —
+1. Validar o que ficou pendente acima: login SmartClient real, DBMonitor/psql, convivência com o
+   Compose (`./run.sh postgres` com o cluster no ar, checar `127.0.0.2` responde e `127.0.0.1`
+   continua respondendo).
+2. Retomar a ideia do usuário de uma API própria para atualizar o ambiente — ainda não
+   detalhada.
+3. Depois disso, retomar a validação completa da stack (item 2/backlog, ver histórico abaixo) —
    ainda não decidido entre roteiro estruturado ou passo a passo guiado pelo usuário.
 
 ## Histórico condensado da sessão de 2026-09-22 — cofre GPG unificado, permissão do volume SYSTEM corrigida e validada ao vivo
