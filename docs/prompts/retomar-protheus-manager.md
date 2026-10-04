@@ -1,5 +1,8 @@
 # Prompt de continuidade — Protheus Manager (atualização de artefatos e topologia por release)
 
+> **SUPERADO em 2026-10-04 (noite):** a discussão A/B foi concluída nos ADRs 0022 e 0023. Use
+> [`retomar-implementacao-topologias.md`](retomar-implementacao-topologias.md). Este arquivo fica como registro.
+
 Escrito em **2026-10-04**, no fim da sessão em que o Protheus Manager (API em Go + frontend) foi colocado no ar. É
 autossuficiente: copie **o bloco abaixo, inteiro e sem editar**, numa sessão nova do Claude Code aberta em
 `/media/rodrigo/dados/k8s-protheus-devops-stack`.

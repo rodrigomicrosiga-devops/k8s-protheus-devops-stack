@@ -4,8 +4,72 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-10-04, fim do dia — Protheus Manager no ar; estado conferido ao vivo)
+## Onde paramos (2026-10-04, noite — frentes A e B DECIDIDAS em ADR; nenhum código escrito)
 
+> **Como ler:** ✅ = conferido ao vivo às 21:15 UTC; 🟡 = validado antes, não revalidado; ❓ = nunca verificado.
+> Esta seção **manda** sobre tudo abaixo. A seção seguinte ("Histórico … fim do dia") é a versão anterior
+> de "Onde paramos": o estado ao vivo e as seções 2–5, 7 e 8 dela seguem válidos (referência), mas a parte
+> de **discussão (6)** foi **superada** pelos ADRs 0022 e 0023.
+> Prompt para retomar: [`docs/prompts/retomar-implementacao-topologias.md`](prompts/retomar-implementacao-topologias.md).
+
+### Estado ao vivo (✅ 21:15 UTC — idêntico ao da manhã/tarde; nada foi alterado no cluster nesta sessão)
+- Argo CD `Synced`/`Healthy`; 13 pods `1/1`; `appserver-rest` e `appserver-telnet` com **0 réplicas**
+  (parados pelo usuário às 19:57; **decisão: continuam parados**); 14 portas em `127.0.0.1`.
+- API Go `0.4.0`, digest `dabb7d7acf57…`; web `7663f85146cb…`; 4 repos com `HEAD == origin/develop`
+  (antes dos commits desta sessão); 168 tabelas no Postgres.
+- 🔴 **L1:** imagens com conteúdo TOTVS **continuam públicas** (HEAD anônimo 200 em rpo/system/systemload
+  `12.1.2510`, appserver `24.3.1.9`, dbaccess `24.1.1.3`, license `3.7.2`). **Decisão do usuário: manter por
+  ora.** O registro entra como parâmetro nos desenhos novos. Ordem segura para privar: HANDOFF 0.1 abaixo.
+- L2 (`run-job.sh` com Job real) segue ❓ e é **disparo do usuário**.
+- Docker Hub hoje: **1 tag por repositório** (nenhuma `12.1.2610` publicada ainda).
+
+### Decisões desta sessão (detalhe e justificativa nos ADRs)
+| ADR | Decisão |
+|---|---|
+| [0022](adr/0022-n-topologias-por-cluster.md) | **1 cluster, N topologias**, uma por namespace; `base/` genérica + overlay `topologies/<nome>/` + ApplicationSet; `protheus-devops` vira a 1ª com **render idêntico** (diff vazio); `127.0.0.N` por topologia com as portas padrão; PVs com prefixo; base **vazia** + bootstrap manual do usuário; Image Updater com 1 `applicationRef` por topologia; publicar portas é **passo de host do usuário** |
+| [0023](adr/0023-catalogo-releases-atualizacao-migracao.md) | **Catálogo** `catalog/releases/<release>.yaml` no git (seeds, binários `pinned`+`compatible`, digests, tabelas do portão por release — resolve L9); a API **só consome** imagens publicadas; troca de binário **gera** a mudança e o **usuário commita** (fase 2 futura: branch com deploy key; **nunca** `develop`); 4 travas (imagem no Hub, backup `Completed`, portão, confirmação digitada); **migração de release = endpoint exclusivo, assíncrono**, pausa em "aguardando merge"; `custom.rpo` vale entre releases, `tttm120`/`tlpp` são únicos por release (arquivados, nunca apagados); **auditoria durável = JSONL em PV próprio**, pré-requisito de tudo |
+
+Respostas do usuário que moldaram o desenho: release = rpo+system+systemload **e** binários (a `12.1.2610`
+traz binários novos, ex.: appserver `26.x`); quer **migrar** ou **criar** topologia; "inteligência" =
+`compatible` por release escrito por ele; migração deve "preparar tudo" e disparar o UPDDISTR de forma
+acompanhável (assíncrona).
+
+### Ordem de implementação (proposta no ADR 0023 — **a confirmar** na próxima sessão)
+1. Auditoria durável + armazenamento de operações · 2. Catálogo da `12.1.2510` (digests, tabelas do portão) ·
+3. Spikes s1/s2 e refatoração `base/` → `topologies/protheus-devops` + ApplicationSet · 4. API: catálogo,
+descoberta (A2), geração da troca de binário · 5. Fase 3 (worker/compile/upddistr) atrás do portão ·
+6. Criar topologia · 7. Operação de migração · 8. L5, F2, F3 e demais lacunas.
+**Antes de codar cada etapa:** a rota nova começa em `openapi/openapi.json` e passa na régua (com e sem
+`--mutating`); fakes oficiais do `client-go` + teste de mutação; prévia ao lado com imagem de **outro nome**;
+conferir `imageID` e `/health` depois de qualquer rollout.
+
+### Lacunas novas desta sessão (somam-se às L1–L15 da seção 4 do histórico abaixo)
+| # | Sev. | O que é | Estado |
+|---|---|---|---|
+| F1 | 🟡 | A release está cravada em **4 lugares por seed** (`ENV`/`LABEL` do Dockerfile — não é `ARG` —, tag do workflow, `base/protheus-seed.yaml`, alias do ImageUpdater). Publicar a `12.1.2610` exige editar os repos das imagens; o catálogo só referencia | ✅ conhecido |
+| F2 | 🟠 | A CI do `docker-protheus-rpo` copia o RPO de `docker-protheus-devops-stack/protheus/apo/` — o diretório **vivo** do Compose, alterado por worker/compile. **Antes de publicar a `12.1.2610` a fonte tem que ser um diretório pristino.** Não verifiquei se o digest atual é o pristino `568f185e…` (publicado em 29/07, antes dos patches: indício, não prova) | ❓ |
+| F3 | 🟡 | O entrypoint do `systemload` não tem a checagem de "permission denied" que o do `system` ganhou em 22/09 (extração parcial marcada como sucesso) | ✅ conhecido |
+| F4 | 🟠 | Não verifiquei se o Docker Hub **mantém manifestos que perderam a tag** — o rollback por digest anterior depende disso | ❓ |
+| F5 | 🟡 | 15 GiB de RAM, 4 vCPU, ~6,6 GiB disponíveis, swap em uso (1,2 GiB). Uma topologia a mais ≈ +1–1,5 GiB (estimativa). Não medido sob carga | ❓ |
+| F6 | 🟡 | Publicar portas = `k3d cluster edit --port-add` (recria o `serverlb`): ação de host; "criar topologia" termina sempre num passo do usuário | ✅ decidido |
+| S1–S3 | 🟠 | **Spikes não executados:** s1 ApplicationSet adotar o `Application` vivo sem prune/recriar; s2 ImageUpdater com 2 `applicationRefs` e tags diferentes do mesmo nome de imagem; s3 Job curto mover arquivos do PV `apo`. Todos em namespace descartável, antes de tocar o ambiente | ❓ |
+| T1 | 🟡 | Em aberto nos ADRs: destino do texto puro dos segredos por topologia (cofre GPG); política de **remoção** de topologia (comandos destrutivos são do usuário); limite real de memória com 2 topologias | ❓ |
+
+Também **não** verificado nesta sessão: régua de contrato (46 checks), backups Velero, host/`rshared` (L3).
+
+### Pendências por dono
+**Usuário:** confirmar a ordem de implementação; escrever os `compatible` da `12.1.2510` quando o catálogo
+nascer; decidir L1 quando quiser; rodar o Job real (L2) quando quiser; apagar sobras no Docker Hub; reboot de
+prova (L3); conferir os diagramas no GitHub (L7). **Assistente:** começar pela etapa 1 (auditoria durável)
+**só depois** de o usuário confirmar a ordem; nada sobre L1/L2/L3 sem ele.
+
+---
+
+## Histórico — versão anterior de "Onde paramos" (2026-10-04, fim do dia — Protheus Manager no ar; estado conferido ao vivo)
+
+> **Superado em parte (2026-10-04, noite):** a seção 6 (frentes A e B) foi decidida nos ADRs 0022/0023; o resto
+> segue como referência do estado ao vivo.
+>
 > **Como ler:** ✅ = conferido ao vivo no fechamento desta sessão (2026-10-04, ~20:00–20:15 UTC);
 > 🟡 = validado antes, hoje, **não** revalidado agora; ❓ = **nunca** verificado. Esta seção foi escrita
 > **depois de reconferir tudo**, justamente porque a cronologia do dia (logo abaixo, "Histórico … tarde")
@@ -129,7 +193,7 @@ for conveniente; (g) conferir os diagramas no GitHub (L7).
 **discussão A e B (sem implementar)** → auditoria durável → Fase 3 → corrigir L5. Não fazer nada sobre L1/L2/L3 sem o
 usuário.
 
-### 6. Frentes de discussão (decidir ANTES de implementar)
+### 6. Frentes de discussão — ~~decidir ANTES de implementar~~ **DECIDIDAS em 2026-10-04 (noite): ver ADRs 0022 e 0023; o texto abaixo é o ponto de partida da discussão**
 
 #### A. Serviço de atualização de artefatos
 **Premissa do usuário (2026-10-04):** tudo que for atualizado já precisa ter **imagem criada e publicada no Docker
