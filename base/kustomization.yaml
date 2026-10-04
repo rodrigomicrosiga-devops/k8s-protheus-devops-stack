@@ -29,6 +29,8 @@ resources:
   - protheus-manager.yaml
   - manager-secret.sealed.yaml
   - protheus-manager-web.yaml
+  # TEMPORÁRIO (ADR 0021): prévia da API em Go ao lado da Python. Sai no cutover.
+  - protheus-manager-api-preview.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:
