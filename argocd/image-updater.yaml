@@ -95,7 +95,7 @@ spec:
             kustomize:
               name: rodrigomicrosiga/protheus-systemload-dev
         - alias: protheus-manager-api
-          imageName: docker.io/rodrigomicrosiga/protheus-manager-api-dev:0.2.0
+          imageName: docker.io/rodrigomicrosiga/protheus-manager-api-dev:0.3.0
           commonUpdateSettings:
             updateStrategy: digest
           manifestTargets:

@@ -1,7 +1,7 @@
 # protheus-manager-api (repo irmão protheus-manager-api, desenho no ADR 0019).
-# Fase 1: SOMENTE LEITURA -- a Role abaixo não tem nenhum verbo de escrita. Quando as
-# fases 2/3 precisarem (scale, Jobs), a Role cresce junto, nunca antes, e nunca vira
-# cluster-admin. Stateless: sem volume, então RollingUpdate padrão (diferente dos
+# Fase 2: leitura + escrita de baixo risco. Cada permissão abaixo existe por UMA ação da
+# API e está comentada com ela -- a Role só cresce junto com a fase, nunca antes, e nunca
+# vira cluster-admin. Fase 3 (Jobs) vai pedir `jobs` create/delete aqui. Stateless: sem volume, então RollingUpdate padrão (diferente dos
 # componentes com hostPath, ver README "Estratégia de Rollout").
 apiVersion: v1
 kind: ServiceAccount
@@ -12,9 +12,10 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: protheus-manager-leitura
+  name: protheus-manager
   namespace: protheus-devops
 rules:
+  # Leitura (GET /services, /logs)
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["get", "list"]
@@ -24,11 +25,20 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  # POST /services/{name}/stop|start -- só a subresource `scale`: NÃO dá `patch` em
+  # `deployments`, que permitiria trocar imagem/env/volumes (RBAC não filtra por campo).
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "patch", "update"]
+  # POST /services/{name}/restart -- apaga pods e o Deployment os recria.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: protheus-manager-leitura
+  name: protheus-manager
   namespace: protheus-devops
 subjects:
   - kind: ServiceAccount
@@ -37,7 +47,64 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: protheus-manager-leitura
+  name: protheus-manager
+---
+# GET /gitops, POST /gitops/sync|refresh -- restrito por resourceNames ao ÚNICO Application
+# deste ambiente (get/patch aceitam resourceNames; list não, e a API não lista).
+# Aceito e documentado (ADR 0019): `patch` num Application permite alterar o spec dele.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: protheus-manager-gitops
+  namespace: argocd
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    resourceNames: ["protheus-devops-stack"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: protheus-manager-gitops
+  namespace: argocd
+subjects:
+  - kind: ServiceAccount
+    name: protheus-manager
+    namespace: protheus-devops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: protheus-manager-gitops
+---
+# GET/POST /backups -- cria Backup e lê o template do Schedule (só o protheus-daily).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: protheus-manager-backups
+  namespace: velero
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["velero.io"]
+    resources: ["schedules"]
+    resourceNames: ["protheus-daily"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: protheus-manager-backups
+  namespace: velero
+subjects:
+  - kind: ServiceAccount
+    name: protheus-manager
+    namespace: protheus-devops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: protheus-manager-backups
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -62,7 +129,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: protheus-manager-api
-          image: rodrigomicrosiga/protheus-manager-api-dev:0.2.0
+          image: rodrigomicrosiga/protheus-manager-api-dev:0.3.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8800
