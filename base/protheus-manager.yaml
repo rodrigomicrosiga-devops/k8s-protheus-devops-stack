@@ -129,7 +129,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: protheus-manager-api
-          image: rodrigomicrosiga/protheus-manager-api-dev:0.3.0
+          image: rodrigomicrosiga/protheus-manager-api-dev:0.4.0
           imagePullPolicy: Always
           ports:
             - containerPort: 8800
@@ -174,14 +174,16 @@ spec:
               port: 8800
             initialDelaySeconds: 10
             periodSeconds: 20
+          # Go (ADR 0021): medido em 7 MiB de uso; a versão Python usava 89 MiB e pedia 64Mi/256Mi.
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 20m
+              memory: 32Mi
             limits:
-              memory: 256Mi
+              memory: 128Mi
           # Contraste deliberado com o ADR 0001 (license/smartview privilegiados): esta API
-          # não precisa de nada além de falar HTTP e chamar o API server.
+          # não precisa de nada além de falar HTTP e chamar o API server. A imagem é distroless
+          # (sem shell), então nem um atacante com execução teria o que usar.
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
