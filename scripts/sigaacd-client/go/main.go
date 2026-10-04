@@ -15,8 +15,14 @@
 //
 // Uso:
 //
-//	kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
-//	go run . [host] [porta]      # default 127.0.0.1:2323
+//	// Desde o ADR 0017, o serverlb do k3d publica a porta 23 direto em
+//	// 127.0.0.1 -- nao precisa mais de port-forward:
+//	go run . [host] [porta]      # default 127.0.0.1:23
+//
+//	// Plano B, so se o cluster nao tiver essas portas mapeadas (ex. criado
+//	// antes do ADR 0017):
+//	//   kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
+//	//   go run . 127.0.0.1 2323
 //
 // Pra sair do CLIENTE (nao do SIGAACD): Ctrl+].
 package main
@@ -50,7 +56,7 @@ const (
 const ctrlCloseBracket = 0x1d // Ctrl+] -- sai do cliente, nao do SIGAACD
 
 func main() {
-	host, port := "127.0.0.1", "2323"
+	host, port := "127.0.0.1", "23"
 	if len(os.Args) > 1 {
 		host = os.Args[1]
 	}

@@ -153,6 +153,16 @@ Achado 1 do ADR 0013 original (a dependência circular do `smartview-db-init-job
 `03-install-argocd.sh` ainda descrevem o bypass manual do achado 1 como se fosse necessário —
 desatualizados, não corrigidos nesta sessão (ver `docs/HANDOFF.md`).
 
+### Follow-up — 2026-10-04: achado 5 superado, portas padrão agora SÃO mapeadas
+
+O achado 5 ("Porta 7890 nunca é mapeada") descrevia um estado que mudou: `00-create-cluster.sh`
+agora mapeia a 7890 (e as demais portas padrão do Protheus) no `serverlb`, só que presas a
+`127.0.0.1` em vez de `0.0.0.0` — ver ADR 0017. Não é regressão da colisão que motivou o fix
+original (item 4 do backlog antigo, de 18/09): aquela colisão era com o Compose publicando
+`0.0.0.0:7890`; o Compose passou a publicar em `127.0.0.2` (ADR 0017), então os dois binds
+convivem sem disputa. O próximo drill do zero nasce com acesso fixo nessas portas, sem precisar
+de `port-forward`.
+
 ## Consequências
 - Fecha o item 3 do backlog — receita completa versionada, testada ao vivo (ver Validação).
 - `scripts/cluster-bootstrap/01-fix-cgroupns.sh` generaliza a lógica do ADR 0008/`scripts/k3d-nodes/`

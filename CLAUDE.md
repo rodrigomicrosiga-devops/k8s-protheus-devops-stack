@@ -44,8 +44,8 @@ em 2026-07-30 (detalhe completo em `docs/HANDOFF.md`). Sequência obrigatória:
 1. Assim que o `core` sobe pela primeira vez contra um banco vazio, **avisar o usuário
    imediatamente** — não prosseguir sozinho.
 2. Usuário valida banco, dbaccess, dbaccess×banco (cada validação é dele, não substituível).
-3. Usuário abre a URL do SmartClient (`http://<host>:<CORE_PORT_MULTI>/`) e define
-   usuário/senha inicial.
+3. Usuário abre a URL do SmartClient (`http://127.0.0.1:<CORE_PORT_MULTI>/` no cluster k8s desde
+   o ADR 0017; `http://<host>:<CORE_PORT_MULTI>/` no Compose local) e define usuário/senha inicial.
 4. Só então o próprio Protheus cria as tabelas `SYS_*`, e só então UPDDISTR/worker/compile podem
    rodar.
 

@@ -9,23 +9,24 @@ A stack adota isolamento completo de rede via Namespace e injeção dinâmica de
 ```mermaid
 graph TD
     subgraph M_FISICA["Máquina Física (Linux Mint)"]
-        DBeaver[DBeaver / pgAdmin] -- "Túnel Local: 5432" --> K3D_LB
-        DBMonitor[TOTVS DBMonitor] -- "Túnel Local: 7891" --> K3D_LB
+        DBeaver[DBeaver / pgAdmin] -- "127.0.0.1:5432" --> K3D_LB
+        DBMonitor[TOTVS DBMonitor] -- "127.0.0.1:7890" --> K3D_LB
+        SmartClient[SmartClient] -- "127.0.0.1:1234" --> K3D_LB
     end
 
     subgraph CLUSTER["Cluster K3d (Namespace: protheus-devops)"]
-        K3D_LB[K3d LoadBalancer / Port-Forward]
-        
+        K3D_LB["serverlb (k3d) <br> portas padrão Protheus fixas em 127.0.0.1 -- ADR 0017"]
+
         subgraph DBA_LAYER["Camada de Conectividade"]
-            DBA_SVC["Service: dbaccess-service <br> NodePort: 30890"] --> DBA_POD["Pod: DbAccess <br> v24.1.1.3"]
+            DBA_SVC["Service: dbaccess-service <br> NodePort: 30890 (host 127.0.0.1:7890)"] --> DBA_POD["Pod: DbAccess <br> v24.1.1.3"]
         end
 
         subgraph LIC_LAYER["Camada de Licenciamento"]
-            LIC_SVC["Service: license-service <br> NodePort: 30555 / 30820"] --> LIC_POD["Pod: License Server <br> v3.7.2 (privileged)"]
+            LIC_SVC["Service: license-service <br> NodePort: 30555 / 30820 (host 127.0.0.1:5555 / :8020)"] --> LIC_POD["Pod: License Server <br> v3.7.2 (privileged)"]
         end
 
         subgraph PG_LAYER["Camada de Persistência"]
-            PG_SVC["Service: postgres-service <br> Porta: 5432"] --> PG_POD["Pod: PostgreSQL"]
+            PG_SVC["Service: postgres-service <br> NodePort: 30432 (host 127.0.0.1:5432)"] --> PG_POD["Pod: PostgreSQL"]
             PG_POD --> PVC[PersistentVolumeClaim] --> PV["PersistentVolume <br> local-path: /media/rodrigo/dados/"]
         end
 
@@ -62,7 +63,7 @@ graph TD
         end
 
         subgraph SV_LAYER["Camada de Relatórios"]
-            SV_SVC["Service: smartview-service <br> NodePort: 30719 / 30717"] --> SV_POD["Pod: SmartView <br> v3.9.0 (privileged, systemd PID 1)"]
+            SV_SVC["Service: smartview-service <br> NodePort: 30719 / 30717 (host 127.0.0.1:7019 / :7017)"] --> SV_POD["Pod: SmartView <br> v3.9.0 (privileged, systemd PID 1)"]
             SV_JOB["Job (hook PreSync): smartview-db-init"] -.provisiona.-> PG_SVC
         end
 
@@ -93,27 +94,28 @@ kubectl apply -k base/
 ```
 2. Validar o Banco de Dados (`PostgreSQL`)
 
-Crie um redirecionamento de porta para acessar o banco externamente via `DBeaver` ou similar:
+Desde o ADR 0017, o `serverlb` do k3d publica as portas padrão do Protheus fixas em
+`127.0.0.1` — não é mais preciso `port-forward` nem descobrir o IP do node agent. Acesse direto
+via `DBeaver` ou similar:
 
-```bash
-kubectl port-forward deployment/postgres 5432:5432 -n protheus-devops
-```
+`Host`: `127.0.0.1` | `Porta`: `5432` | `Banco`: conforme configurado no `postgres.env`
 
-`Host`: localhost | `Porta`: 5432 | `Banco`: Conforme configurado no `postgres.env`
+(Plano B, se o `serverlb` não tiver essas portas mapeadas — ex. num cluster criado antes do ADR
+0017: `kubectl port-forward deployment/postgres 5432:5432 -n protheus-devops`.)
 
 3. Validar a Conectividade (`DbAccess`)
 
-Caso a porta nativa 7890 esteja ocupada por instâncias locais da máquina host, direcione para uma porta alternativa para abrir no `DBMonitor`:
+Abra o `DBMonitor` apontando para `127.0.0.1:7890` — a mesma porta padrão do `dbaccess.ini`, sem
+precisar de redirecionamento.
 
-```bash
-kubectl port-forward deployment/dbaccess 7891:7890 -n protheus-devops
-```
+(Plano B: `kubectl port-forward deployment/dbaccess 7891:7890 -n protheus-devops`, usando uma
+porta alternativa no host caso a 7890 esteja ocupada por outra instância.)
 
 4. Validar o License Server
 
-```bash
-kubectl port-forward deployment/license 5555:5555 -n protheus-devops
-```
+Acesse direto em `127.0.0.1:5555` (e o monitor em `127.0.0.1:8020`).
+
+(Plano B: `kubectl port-forward deployment/license 5555:5555 -n protheus-devops`.)
 
 **Nota de segurança**: o Pod do `license` roda com `securityContext.privileged: true` e monta `/dev/mem` do host (`hostPath`). Isso replica o `cap_add: SYS_RAWIO` + `devices: /dev/mem:/dev/mem` que o `docker-compose` original já usava — o binário da TOTVS (via `dmidecode`, empacotado na imagem) lê `/dev/mem` para gerar o fingerprint de hardware ao qual a licença é vinculada. Sem um device plugin dedicado, o Kubernetes só libera esse acesso via `privileged: true`. Como o node do K3d roda no mesmo host físico da máquina de desenvolvimento, o fingerprint resultante é o mesmo de quando a licença rodava via `docker-compose`.
 
@@ -135,10 +137,14 @@ Antes do AppServer, os três seeds (`protheus-rpo-seed`, `protheus-system-seed`,
 
 ```bash
 kubectl get pods -n protheus-devops -l 'app in (protheus-rpo-seed,protheus-system-seed,protheus-systemload-seed,appserver-core,appserver-rest,appserver-telnet)'
-kubectl port-forward deployment/appserver-core 1234:1234 -n protheus-devops   # Multi-protocolo (SmartClient)
-kubectl port-forward deployment/appserver-rest 8400:8400 -n protheus-devops  # REST
-kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops  # Telnet (monitor) -- 23 é privilegiada, usar outra porta local
 ```
+
+Com o ADR 0017, o acesso é direto, sem `port-forward`: SmartClient em `http://127.0.0.1:1234/webapp`,
+REST em `127.0.0.1:8400`, telnet em `127.0.0.1:23`.
+
+(Plano B, só se o `serverlb` não tiver essas portas mapeadas:
+`kubectl port-forward deployment/appserver-core 1234:1234 -n protheus-devops` / `deployment/appserver-rest 8400:8400` /
+`deployment/appserver-telnet 2323:23` -- 23 é privilegiada, usar outra porta local no host.)
 
 **Acesso ao console `SIGAACD` (telnet)**: clientes telnet genéricos — testado com PuTTY — não
 conseguem navegar o menu dele (navegação real é digitar o número da posição do item, não seta;
@@ -165,11 +171,11 @@ Detalhe completo (onde depositar cada insumo, por que `upddistr` não confia no 
 
 O bootstrap do banco/usuário do SmartView (`smartview_dev`/`totvs`) roda automaticamente como um **hook `PreSync` do Argo CD** (`smartview-db-init-job.yaml`) — dispara antes da sincronização do restante da stack e se autolimpa (`hook-delete-policy: HookSucceeded`) depois de concluir, não fica pendurado como um Job "morto" no namespace.
 
-```bash
-kubectl port-forward deployment/smartview 7019:7019 -n protheus-devops
-```
+Com o ADR 0017, a interface fica disponível direto em `http://127.0.0.1:7019`, sem `port-forward`.
 
-A interface fica disponível em `http://localhost:7019`. A partir daí, a configuração da conexão com o dicionário de dados do Protheus (e qualquer outro ajuste) é feita manualmente pelo usuário, exatamente como já era feito ao subir via `run.sh` localmente — não é algo automatizado por este repositório. Essa configuração fica persistida inteiramente no banco `smartview_dev`, então um restart do Pod não perde nada.
+(Plano B: `kubectl port-forward deployment/smartview 7019:7019 -n protheus-devops`.)
+
+A partir daí, a configuração da conexão com o dicionário de dados do Protheus (e qualquer outro ajuste) é feita manualmente pelo usuário, exatamente como já era feito ao subir via `run.sh` localmente — não é algo automatizado por este repositório. Essa configuração fica persistida inteiramente no banco `smartview_dev`, então um restart do Pod não perde nada.
 
 **Nota de segurança**: o Pod do `smartview` roda com `securityContext.privileged: true` e monta `/sys/fs/cgroup` do host (`hostPath`, `rw`) — escopo de acesso maior que o do `license` (que monta só o char device `/dev/mem`). Isso é necessário porque a imagem roda **systemd completo como PID 1** internamente (gerenciando o serviço `smart-view-agent`), e o systemd precisa administrar cgroups reais do host pra isso funcionar — o mesmo `--privileged` + `-v /sys/fs/cgroup:/sys/fs/cgroup:rw` que o próprio README da imagem Docker já documenta como pré-requisito. Não há endpoint HTTP de health documentado; a validação (liveness/readiness) é feita via probe `exec` rodando `systemctl is-active smart-view-agent.service` dentro do container, o mesmo comando usado manualmente pra validar a imagem antes desta automação.
 

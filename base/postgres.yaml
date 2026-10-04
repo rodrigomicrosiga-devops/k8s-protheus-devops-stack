@@ -146,15 +146,21 @@ spec:
           persistentVolumeClaim:
             claimName: postgres-dumps-pvc
 ---
+# NodePort (não ClusterIP) desde o ADR 0017 -- expõe 5432 fixo via serverlb do
+# k3d (127.0.0.1:5432 no host), substituindo o port-forward manual. O escopo
+# "só Postgres" do ADR 0005 não muda: isso é só acesso externo ao mesmo banco,
+# não abre MSSQL/Oracle.
 apiVersion: v1
 kind: Service
 metadata:
   name: postgres-service
   namespace: protheus-devops
 spec:
+  type: NodePort
   selector:
     app: postgres
   ports:
     - protocol: TCP
       port: 5432
       targetPort: 5432
+      nodePort: 30432

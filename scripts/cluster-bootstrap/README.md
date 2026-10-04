@@ -50,7 +50,8 @@ não extraídos antes).
 # 0. (se houver um cluster antigo pra substituir)
 k3d cluster delete protheus-cluster
 
-# 1. Cluster novo (rede + nodes + volumes, sem a porta 7890 desde o início)
+# 1. Cluster novo (rede + nodes + volumes, já nasce com as portas padrão do
+#    Protheus fixas em 127.0.0.1 via serverlb -- ADR 0017, sem porta 7890 nua)
 ./scripts/cluster-bootstrap/00-create-cluster.sh
 
 # 2. Fix do bug de cgroup v2 -- rodar nos dois nodes, um de cada vez
@@ -90,9 +91,11 @@ sha256sum <caminho hostPath>/protheus-apo/tttm120.rpo                # deve bate
 Ver ADR 0013 pro detalhe completo. Resumo:
 - `k3d cluster create` **não tem flag nativa pra `--cgroupns host`** — por isso o passo 2 é
   obrigatório e separado, não algo que dá pra passar direto na criação.
-- O `serverlb` nasce **sem** a porta 7890 desde o primeiro `k3d cluster create` desta receita
-  (`00-create-cluster.sh` já não mapeia) — diferente do cluster original, que precisou de um
-  `k3d cluster edit --port-delete` depois (item 4 do backlog, já fechado).
+- O `serverlb` nasce sem a porta 7890 **nua** (`0.0.0.0`) desde o primeiro `k3d cluster create`
+  desta receita — diferente do cluster original, que precisou de um `k3d cluster edit
+  --port-delete` depois (item 4 do backlog, já fechado). Desde 2026-10-04 (ADR 0017) o
+  `00-create-cluster.sh` mapeia a 7890 e as demais portas padrão do Protheus mesmo assim, só que
+  presas a `127.0.0.1` — não colide porque o Compose local passou a publicar em `127.0.0.2`.
 - ~~O primeiro sync completo do Argo CD TRAVA no hook `PreSync` `smartview-db-init`~~ **(HISTÓRICO
   — corrigido pra sempre em 2026-09-21, não se aplica mais, ver abaixo).** Causa era o hook
   depender de `postgres-secret` (`envFrom.secretRef`), um `SealedSecret` comum de `Sync`, não um

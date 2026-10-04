@@ -4,7 +4,80 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-09-22 — cofre GPG unificado, permissão do volume SYSTEM corrigida e validada ao vivo)
+## Onde paramos (2026-10-04 — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017)
+
+Sessão de continuação. Usuário trouxe três dúvidas reais sobre acesso/operação do cluster antes
+de retomar a validação da stack (item 2 ainda pausado, ver histórico abaixo) — nenhuma delas era
+bug, as três abriram uma decisão de infraestrutura nova, que foi implementada nesta sessão.
+
+### As três dúvidas e o que motivaram
+1. **`http://127.0.0.1:1234/webapp` não funciona sozinho ao ligar o note** — confirmado: só
+   funciona enquanto um `port-forward` estiver de pé, ou via IP do node agent (`172.18.0.2` hoje,
+   **mudou** desde os `172.18.0.3` registrados em 22/09 — `docker` redistribui o IP a cada vez que
+   os containers do k3d sobem numa ordem diferente).
+2. **dbaccess/monitor/banco exigem `port-forward`?** dbaccess não (NodePort `30890` já exposto no
+   IP do node, mesmo problema de IP variável); Postgres sim, porque `postgres-service` era
+   `ClusterIP` puro (decisão original do ADR 0005, que não mudava o tipo de Service).
+3. **Como parar `rest`/`telnet` pelo k9s?** Dá pra fazer `scale` pelo k9s, mas o `selfHeal: true`
+   da `Application` (`argocd/application.yaml:18`) reverte em segundos — é o GitOps funcionando
+   como desenhado. O caminho certo continua sendo `replicas: 0` commitado no git. Alternativa
+   (`ignoreDifferences` em `/spec/replicas`) ficou registrada mas não implementada — decisão fica
+   pra quando a ideia da API de atualização (ver abaixo) for detalhada.
+
+### Decisão tomada — ADR 0017: portas padrão do Protheus via serverlb, loopback dedicado por ambiente
+Pedido explícito do usuário: acesso fixo, sem `port-forward`, **nas portas padronizadas do
+Protheus** (as do `appserver.ini`/`dbaccess.ini` — `1234`, `7890`, `8400`, `23`, `5432`...), com o
+**cluster como prioridade** sobre o Compose local em qualquer disputa de porta (ele quer aprofundar
+o cluster como ambiente de referência/vitrine Kubernetes do projeto; o Compose continua evoluindo
+em paralelo, mas secundário). Decisão: cluster fixo em `127.0.0.1` via `k3d ... --port-add
+"127.0.0.1:<porta>:<nodeport>@loadbalancer"`; Compose passa a publicar em `127.0.0.2` explícito.
+Detalhe completo, alternativas descartadas e consequências em
+[`docs/adr/0017-portas-padrao-protheus-via-serverlb-loopback.md`](adr/0017-portas-padrao-protheus-via-serverlb-loopback.md).
+
+**O que mudou neste repo** (commit pendente nesta sessão):
+- `base/postgres.yaml`: `postgres-service` de `ClusterIP` pra `NodePort` (`nodePort: 30432`) —
+  único jeito de entrar nesse esquema; escopo "só Postgres" do ADR 0005 não muda.
+- `scripts/cluster-bootstrap/00-create-cluster.sh`: array `PORTS` com as 12 portas padrão
+  (core/rest/telnet/dbaccess/license/smartview/postgres), passadas como `--port
+  ...@loadbalancer` no `k3d cluster create` — o próximo drill do zero já nasce com acesso fixo.
+- `README.md`: diagrama Mermaid e os passos 2-4/6/8 trocaram `port-forward` como caminho
+  primário por acesso direto em `127.0.0.1`, mantendo o `port-forward` documentado como plano B
+  (cluster criado antes do ADR 0017, sem essas portas mapeadas).
+- `CLAUDE.md`: URL do SmartClient no fluxo de bootstrap manual agora distingue cluster
+  (`127.0.0.1`) de Compose (`<host>`).
+- `docs/adr/0013-cluster-bootstrap-do-zero.md`: follow-up registrando que o achado 5 ("porta 7890
+  nunca é mapeada") foi superado — a 7890 agora É mapeada, só que presa a `127.0.0.1`, sem
+  reabrir a colisão original com o Compose (que migrou pra `127.0.0.2`).
+- `scripts/cluster-bootstrap/README.md`: dois trechos que descreviam "sem a porta 7890" como
+  verdade atual, corrigidos pra refletir o ADR 0017.
+- `scripts/sigaacd-client/{python,go,README.md}`: **achado do usuário, não do assistente** — os
+  dois clientes telnet (criados em 2026-09-20) tinham o default `127.0.0.1:2323` hardcoded (o
+  par host/porta do `port-forward`). Nenhuma lógica de protocolo dependia disso (os dois já
+  aceitavam host/porta por argumento), mas o *default* e a documentação assumiam port-forward como
+  único caminho. Corrigido: default passa a `127.0.0.1:23` (porta padrão, direto via ADR 0017),
+  com o `port-forward`/`2323` documentado como plano B explícito nos dois READMEs e nos
+  docstrings/comentários dos dois clientes.
+
+**Pendente nesta sessão, ainda não executado**: a aplicação ao vivo no cluster atual
+(`k3d cluster edit protheus-cluster --port-add ...`, recria o `serverlb`) e a parte B no repo
+irmão `docker-protheus-devops-stack` (Compose pra `127.0.0.2` via `HOST_BIND_IP`, `dbaccess` de
+volta a `7890` no host). Nenhum commit/push feito ainda nesta sessão — ver seção "Próximo passo".
+
+### Próximo passo ao retomar
+1. Commitar as mudanças deste repo (sem trailer de IA).
+2. Editar `docker-protheus-devops-stack` (parte B do ADR 0017: `HOST_BIND_IP=127.0.0.2`,
+   `DBACCESS_HOST_PORT` de volta a `7890`).
+3. Usuário roda `k3d cluster edit protheus-cluster --port-add ...` (as 12 portas, um comando só)
+   **depois** do sync do Argo CD que tornar o Postgres `NodePort` — senão o mapeamento de 5432
+   aponta pra um NodePort que ainda não existe.
+4. Validar ao vivo sem nenhum `port-forward` ativo: webapp, DBMonitor, psql, SIGAACD
+   (`scripts/sigaacd-client`), REST, smartview — lista completa no ADR 0017.
+5. Usuário trouxe uma ideia de API própria para atualizar o ambiente — ainda não detalhada,
+   retomar depois de fechar o ADR 0017 ao vivo.
+6. Depois disso, retomar a validação completa da stack (item 2/backlog, ver histórico abaixo) —
+   ainda não decidido entre roteiro estruturado ou passo a passo guiado pelo usuário.
+
+## Histórico condensado da sessão de 2026-09-22 — cofre GPG unificado, permissão do volume SYSTEM corrigida e validada ao vivo
 
 Sessão de continuação, dois itens do backlog herdado fechados na ordem que o usuário definiu
 (1, depois 3 — os itens 2 e 4 ficam para depois, por decisão dele: item 2/`UPDDISTR` só após

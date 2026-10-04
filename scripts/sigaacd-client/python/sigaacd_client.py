@@ -23,9 +23,15 @@ SIGAACD manda (posicionamento de cursor `ESC[lin;colf`, video reverso
 `ESC[7m`) serem desenhados pelo terminal real do usuario, sem traducao.
 
 Uso:
-    kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
+    # Desde o ADR 0017, o serverlb do k3d publica a porta 23 direto em
+    # 127.0.0.1 -- nao precisa mais de port-forward:
     python3 scripts/sigaacd-client/sigaacd_client.py [host] [porta]
-    # default: 127.0.0.1 2323
+    # default: 127.0.0.1 23
+
+    # Plano B, so se o cluster nao tiver essas portas mapeadas (ex. criado
+    # antes do ADR 0017):
+    #   kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
+    #   python3 scripts/sigaacd-client/sigaacd_client.py 127.0.0.1 2323
 
 Navegacao dentro do SIGAACD: numero da posicao do item + ENTER abre; ESC
 aborta/sai da tela atual. Pra sair do CLIENTE (nao do SIGAACD): Ctrl+].
@@ -33,7 +39,7 @@ aborta/sai da tela atual. Pra sair do CLIENTE (nao do SIGAACD): Ctrl+].
 import socket, sys, select, tty, termios, os
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 2323
+PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 23
 
 IAC, DONT, DO, WONT, WILL, SB, SE = 255, 254, 253, 252, 251, 250, 240
 TTYPE, ECHO, SGA = 24, 1, 3

@@ -34,16 +34,13 @@ escolha a que for mais conveniente.
 
 ## Uso
 
-Primeiro, em qualquer um dos dois, o `port-forward` precisa estar de pé:
-
-```bash
-kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
-```
+Desde o ADR 0017, o `serverlb` do k3d publica a porta `23` direto em `127.0.0.1` — não precisa
+mais de `port-forward` antes de usar os clientes:
 
 **Python** (precisa só de `python3`, nada além da stdlib):
 
 ```bash
-python3 scripts/sigaacd-client/python/sigaacd_client.py            # default 127.0.0.1:2323
+python3 scripts/sigaacd-client/python/sigaacd_client.py            # default 127.0.0.1:23
 python3 scripts/sigaacd-client/python/sigaacd_client.py <host> <porta>
 ```
 
@@ -52,8 +49,16 @@ python3 scripts/sigaacd-client/python/sigaacd_client.py <host> <porta>
 ```bash
 cd scripts/sigaacd-client/go
 go build -o sigaacd-client .
-./sigaacd-client              # default 127.0.0.1:2323
+./sigaacd-client              # default 127.0.0.1:23
 ./sigaacd-client <host> <porta>
+```
+
+**Plano B**, só se o cluster em uso não tiver essas portas mapeadas no `serverlb` (ex. criado
+antes do ADR 0017): religue o `port-forward` numa porta alternativa e passe-a explicitamente —
+
+```bash
+kubectl port-forward deployment/appserver-telnet 2323:23 -n protheus-devops &
+python3 scripts/sigaacd-client/python/sigaacd_client.py 127.0.0.1 2323   # ou ./sigaacd-client 127.0.0.1 2323
 ```
 
 Dentro do SIGAACD (nos dois clientes): número da posição do item + `ENTER` abre; `ESC` aborta/sai
