@@ -50,7 +50,7 @@ param serviços, e roda no navegador do usuário, que abre outras páginas.
   usuário único em loopback.
 
 ## Validação (feita antes de publicar)
-- 10 testes de lógica pura (`node --test`), verificados no Node 18 (local) **e no Node 26** (runner).
+- 11 testes de lógica pura (`node --test`), verificados no Node 18 (local) **e no Node 26** (runner).
 - **E2E no Chrome real contra a imagem nginx real** e uma API falsa com o contrato real, 25 checks:
   login com token errado/certo; token só em `sessionStorage` e nada em `localStorage`; tabela,
   indicador do bootstrap, Argo CD e backups; Parar abre confirmação com o efeito, cancelar **não**
@@ -67,6 +67,18 @@ param serviços, e roda no navegador do usuário, que abre outras páginas.
    ambiente local não é o ambiente de CI.
 2. O `README` do frontend previa o proxy injetando token; a análise de CSRF mostrou que seria um
    erro. Registrado aqui como reversão deliberada.
+
+3. **O upstream do proxy precisa ser FQDN.** No cluster o primeiro deploy respondeu 502 ("Host not
+   found"): o `resolver` do nginx **não aplica os domínios de busca** do `resolv.conf`, então
+   `protheus-manager-api-service` não resolve; só `…protheus-devops.svc.cluster.local`. O E2E local
+   passou porque o DNS do Docker aceita o nome curto. Foi pego testando o **pod implantado** contra a
+   API real, não o E2E — a mesma lição das Fases 1 e 2 (fake/ambiente local divergem do real).
+4. **A tela acusava o Kubernetes por um 502 do proxy** ("O Kubernetes recusou a mudança" quando a API
+   estava inacessível). Achado pelo E2E trazido para o repo. Agora: 502 com `detail` vem da API e é
+   repassado; 502 sem `detail` vem do nginx e diz "API inacessível".
+5. Ao mover o E2E para o repo, o `e2e/package.json` com `"type": "module"` quebrou a API falsa
+   (`require` em escopo ESM) e o container morria na hora, escondido atrás do mesmo 502. Renomeada
+   para `.cjs`; o runner agora espera a API falsa subir.
 
 ## Consequências
 - Sem estado no frontend e sem segredo na imagem: o token nunca está no bundle nem no nginx.

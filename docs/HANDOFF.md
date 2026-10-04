@@ -52,9 +52,28 @@ sob demanda (391/391, 0 erros), auditoria em stdout, RBAC por ação verificado,
 roteiro de validação pelo Swagger. Achado: corrida no `restart` (pod `Terminating`), pega só no
 cluster real; corrigida com regressão. **Pendência**: auditoria durável (pré-requisito da Fase 3).
 
-**Próximo, na ordem que o usuário definiu**: (1) ✅ Fase 2; (2) decisões do frontend (CORS/proxy,
-stack — README do `protheus-manager-web`); (3) rodar um Job real (`worker`/`compile`/`upddistr`) pelo
-`run-job.sh`, que ainda não foi executado completo — decisão e disparo do usuário.
+**Frontend implantado** (ADR 0020): `protheus-manager-web` `0.1.0` — tela estática (serviços, logs,
+Argo CD, backups, ações com confirmação), nginx com CSP estrita e proxy de mesma origem que *repassa*
+o token (injetar abriria CSRF). 11 testes + E2E de 25 checks no Chrome real (`e2e/run.sh`). Validado
+contra a API real pelo pod implantado: 15 serviços, bootstrap 36/36, zero violações de CSP.
+Achados (no ADR): CI falhou por Node 26 vs 18; **upstream do nginx precisa ser FQDN** (resolver não usa
+o `search`); a tela acusava o Kubernetes por um 502 do proxy; `type: module` quebrou a API falsa.
+
+**Pendente do usuário**: `k3d cluster edit protheus-cluster --port-add "127.0.0.1:8801:30881@loadbalancer"`
+(até lá a tela só por `kubectl port-forward -n protheus-devops svc/protheus-manager-web-service 8801:8080`).
+
+**Pergunta em aberto do usuário**: migrar a API para **Go**? Respondido: viável e recomendado, mas como
+fase própria **antes da Fase 3** (o código de Jobs é o mais arriscado; escrevê-lo uma vez na linguagem
+final), mesma repo/branch, contrato `/api/v1` congelado, trocar a imagem só depois de repetir ao vivo os
+cenários já validados. Decisão do usuário pendente. Sem `go` no host (build via `golang:1.23-alpine`).
+
+**Observação não investigada**: o log do `license` mostra, a cada ~10 s, o IP/porta do
+`appserver-telnet` (`:1236`) conectando e desconectando, com `FAILED TO NOTIFY THREAD RELEASE`.
+Parece um ciclo de reconexão de licença do telnet; não se sabe se é antigo nem se importa.
+
+**Próximo**: (3) rodar um Job real (`worker`/`compile`/`upddistr`) pelo `run-job.sh`, que ainda não foi
+executado completo — decisão e disparo do usuário. Depois: decidir Go, e a auditoria durável antes da
+Fase 3.
 
 ## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017
 
