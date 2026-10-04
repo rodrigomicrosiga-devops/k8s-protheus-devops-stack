@@ -4,7 +4,26 @@
 > Formato: mantenha a seção "Onde paramos" sempre no topo e mova o resto para "Histórico" quando
 > deixar de ser o ponto ativo.
 
-## Onde paramos (2026-10-04 — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017)
+## Onde paramos (2026-10-04, tarde — queda de energia, ADR 0018, desenho do manager em aberto)
+
+**Queda de energia**: o disco de dados montou depois do Docker (fstab com `nofail`; `systemd-fsck`
+levou ~20s), os nodes do k3d ficaram com o bind mount do `k8s-volume` apontando pra pasta vazia do
+disco raiz. Postgres não montou o PV `postgres-dumps`, `dbaccess` em loop, `k3d-node-rshared` com
+`203/EXEC`. Dado real intacto. Recuperado com `docker restart` nos 2 nodes + `post-boot.sh`; 13
+pods `1/1`, 168 tabelas. **Correção de causa raiz**: ADR 0018 (`RequiresMountsFor` no
+`docker.service` e na unit rshared), commit `9562f16`. Instalada pelo usuário; `systemd-analyze
+critical-chain docker.service` confirma Docker depois do mount. **Falta**: prova por reboot real.
+Sinal de mount tardio: node sem `postgres`/`protheus-apo` em `/media/rodrigo/dados/k8s-volume`.
+
+**Manager (ideia do usuário, nada criado ainda)**: decidido 1 backend (`protheus-manager-api`,
+FastAPI/Swagger) + 1 frontend (`protheus-manager-web`). Usuário quer ações direto no cluster, não
+via GitOps. Ponto a fechar em ADR antes do repo: o `selfHeal` reverte o que o Argo CD possui
+(replicas, tag de imagem). Proposta: replicas via `ignoreDifferences`; Jobs `upddistr`/`compile`/
+`worker`, backup Velero, restart e leitura já ficam fora do Argo CD; troca de versão de imagem é
+a única que ainda exige decisão (override do Image Updater ou commit). Regra dura do `CLAUDE.md`
+(bootstrap manual) deve ser imposta pela API, não só documentada.
+
+## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017
 
 Sessão de continuação. Usuário trouxe três dúvidas reais sobre acesso/operação do cluster antes
 de retomar a validação da stack (item 2 ainda pausado, ver histórico abaixo) — nenhuma delas era
