@@ -1,0 +1,92 @@
+# protheus-manager-web (repo irmão protheus-manager-web, desenho no ADR 0019/0020).
+# nginx servindo a tela estática + proxy de /api para o protheus-manager-api-service, na mesma
+# origem (sem CORS). Stateless, sem token, sem ServiceAccount própria: não fala com o API
+# server do Kubernetes -- só HTTP para a API. Por isso não precisa de nenhuma permissão.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: protheus-manager-web
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: protheus-manager-web
+  template:
+    metadata:
+      labels:
+        app: protheus-manager-web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: protheus-manager-web
+          image: rodrigomicrosiga/protheus-manager-web-dev:0.1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: API_UPSTREAM
+              value: protheus-manager-api-service:8800
+            # CoreDNS do k3s (ClusterIP padrão do kube-dns). O nginx resolve o upstream a cada
+            # requisição, então precisa saber qual DNS usar.
+            - name: DNS_RESOLVER
+              value: 10.43.0.10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Rootfs somente leitura: o nginx só escreve nestes três lugares.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+        - name: conf
+          emptyDir: {}
+---
+# NodePort 30881 -> exposto em 127.0.0.1:8801 pelo serverlb (ADR 0017). Só loopback.
+apiVersion: v1
+kind: Service
+metadata:
+  name: protheus-manager-web-service
+  namespace: protheus-devops
+spec:
+  type: NodePort
+  selector:
+    app: protheus-manager-web
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+      nodePort: 30881

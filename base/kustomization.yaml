@@ -28,6 +28,7 @@ resources:
   # protheus-manager-api (ADR 0019, Fase 1): ServiceAccount de leitura + Deployment + Service.
   - protheus-manager.yaml
   - manager-secret.sealed.yaml
+  - protheus-manager-web.yaml
 
 # Gerador dinâmico de ConfigMaps (variáveis comuns)
 configMapGenerator:

@@ -40,6 +40,7 @@ PORTS=(
   "127.0.0.1:7017:30717"   # smartview
   "127.0.0.1:5432:30432"   # postgres
   "127.0.0.1:8800:30880"   # protheus-manager-api (ADR 0019)
+  "127.0.0.1:8801:30881"   # protheus-manager-web (ADR 0020)
 )
 PORT_ARGS=()
 for p in "${PORTS[@]}"; do
