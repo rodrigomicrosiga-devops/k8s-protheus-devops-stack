@@ -20,7 +20,13 @@ FastAPI/Swagger) + 1 frontend (`protheus-manager-web`). Usuário quer ações di
 via GitOps. Ponto a fechar em ADR antes do repo: o `selfHeal` reverte o que o Argo CD possui
 (replicas, tag de imagem). Proposta: replicas via `ignoreDifferences`; Jobs `upddistr`/`compile`/
 `worker`, backup Velero, restart e leitura já ficam fora do Argo CD; troca de versão de imagem é
-a única que ainda exige decisão (override do Image Updater ou commit). Regra dura do `CLAUDE.md`
+a única que ainda exige decisão (override do Image Updater ou commit).
+
+**Fase 0 do manager feita (local, não publicada)**: `/media/rodrigo/dados/protheus-manager-api`
+(FastAPI, `/health` + Swagger, Dockerfile, CI, 2 testes, imagem validada) e
+`/media/rodrigo/dados/protheus-manager-web` (placeholder). Sem remoto no GitHub e sem secrets do
+Docker Hub ainda. **Próximo**: Fase 1 — `ignoreDifferences`+`RespectIgnoreDifferences` no
+`Application`, migrar `lib.sh`, medir o piso do gate de tabelas, rotas de leitura. Regra dura do `CLAUDE.md`
 (bootstrap manual) deve ser imposta pela API, não só documentada.
 
 ## Histórico condensado da sessão de 2026-10-04 (manhã) — portas padrão do Protheus fixas em 127.0.0.1 via serverlb, ADR 0017

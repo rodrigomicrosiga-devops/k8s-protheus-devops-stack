@@ -119,6 +119,22 @@ de um script manual:
 - Cada fase termina com **validação ao vivo**, não só testes: padrão do projeto desde as ADRs 0015
   e 0016.
 
+## Fase 0 — decisões tomadas (2026-10-04)
+Esqueleto criado localmente em `/media/rodrigo/dados/protheus-manager-api` e
+`/media/rodrigo/dados/protheus-manager-web` (branch `develop`, sem remoto ainda).
+- **Linguagem: Python 3.12 + FastAPI.** O Swagger sai do código; não há contrato para manter à mão.
+- **Roda dentro do cluster**, como Deployment, coerente com a ServiceAccount do item 6 e com o
+  rastreio por Image Updater. Porta `8800` no container.
+- **Imagem** `rodrigomicrosiga/protheus-manager-api-dev:0.1.0`, tag fixa como o resto da frota, com
+  o label `org.opencontainers.image.revision`. CI no runner self-hosted, testes antes do build.
+- **Frontend**: só placeholder. A interface começa depois da Fase 1 da API.
+- Validado ao vivo: `pytest` (2 testes), servidor real respondendo `/health` e `/docs`, imagem
+  construída e rodando como uid 10001. **Não publicado**: sem remoto no GitHub e sem secrets do
+  Docker Hub nos repos novos.
+- Ainda dependem de decisão na Fase 1: como o Deployment lê o veredito do `upddistr` (hoje
+  `lib.sh` usa `docker exec` no node, que um pod não tem — provável montagem do PVC
+  `protheus-systemload` somente leitura), e a porta/NodePort de exposição em `127.0.0.1`.
+
 ## Em aberto (não decidido aqui, de propósito)
 1. **Troca de versão de imagem** (Fase 3). Hoje o Image Updater rastreia por **digest** sob tag
    fixa, e a troca de tag exige editar `base/*.yaml` **e** `argocd/image-updater.yaml` e reaplicar
