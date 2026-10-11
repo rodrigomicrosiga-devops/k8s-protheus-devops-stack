@@ -1,0 +1,130 @@
+# PRÉVIA do protheus-manager-api, ao lado da produção -- NÃO faz parte de base/ (o Argo CD nunca a
+# toca) e é aplicada/removida À MÃO:
+#   kubectl apply -f scripts/manager-preview/protheus-manager-api-preview.yaml
+#   kubectl delete -f scripts/manager-preview/protheus-manager-api-preview.yaml     # destrutivo: do usuário
+#
+# Regras que este arquivo cumpre (cada uma nasceu de um erro real, ADR 0021):
+#  - MESMA ServiceAccount da produção: a validação mede o RBAC de verdade.
+#  - Imagem de OUTRO NOME (protheus-manager-api-go-dev, tag preview-audit): o Image Updater casa o
+#    override pelo nome e já trocou uma prévia pelo digest de produção (L15).
+#  - Labels próprios (app: protheus-manager-api-preview): o Service de produção não a seleciona.
+#  - Service ClusterIP, sem NodePort: acesso por port-forward (a prévia nunca ocupa porta publicada).
+#  - Trilha em emptyDir: não polui nem compete com o PV de produção. Serve para exercitar o caminho
+#    durável (write-ahead + fsync + GET /audit). O caminho de FALHA FECHADA (volume ausente) é
+#    provado com a variante de MANAGER_AUDIT_FILE apontando para um diretório inexistente (abaixo).
+#  - Protege a si mesma e à produção (MANAGER_PROTECTED_SERVICES).
+#
+# Validar (confira o imageID/digest e o /health ANTES de confiar no resultado):
+#   kubectl -n protheus-devops get pod -l app=protheus-manager-api-preview \
+#     -o jsonpath='{.items[0].status.containerStatuses[0].imageID}'
+#   kubectl -n protheus-devops port-forward svc/protheus-manager-api-preview-service 18800:8800 &
+#   curl -s http://127.0.0.1:18800/health      # {"audit":"ok","status":"ok","version":"0.5.0"}
+#   export MANAGER_TOKEN=$(grep '^MANAGER_API_TOKEN=' base/manager-secret.env | cut -d= -f2)
+#   (cd ../protheus-manager-api && scripts/contract-check.sh http://127.0.0.1:18800)
+# ATENÇÃO: `--mutating` usa appserver-telnet como alvo (para e SOBE de novo) e reinicia o printer.
+# Com rest/telnet parados de propósito isso religaria o telnet. NÃO rode `--mutating` sem decidir
+# antes (ver HANDOFF: "Não religue o que o usuário parou").
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: protheus-manager-api-preview
+  namespace: protheus-devops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: protheus-manager-api-preview
+  template:
+    metadata:
+      labels:
+        app: protheus-manager-api-preview
+    spec:
+      serviceAccountName: protheus-manager
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: protheus-manager-api-preview
+          image: rodrigomicrosiga/protheus-manager-api-go-dev:preview-audit
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8800
+          env:
+            - name: MANAGER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MANAGER_PROTECTED_SERVICES
+              value: protheus-manager-api,protheus-manager-api-preview
+            - name: MANAGER_AUDIT_FILE
+              value: /data/audit/audit.jsonl
+            - name: MANAGER_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: manager-secret
+                  key: MANAGER_API_TOKEN
+            - name: DB_HOST
+              value: postgres-service
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: postgres-config
+                  key: DB_USER
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: postgres-config
+                  key: DB_NAME
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: DB_PASS
+          volumeMounts:
+            - name: audit
+              mountPath: /data/audit
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8800
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8800
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: audit
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: protheus-manager-api-preview-service
+  namespace: protheus-devops
+spec:
+  type: ClusterIP
+  selector:
+    app: protheus-manager-api-preview
+  ports:
+    - protocol: TCP
+      port: 8800
+      targetPort: 8800
