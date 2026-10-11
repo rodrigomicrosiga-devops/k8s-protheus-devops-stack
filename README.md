@@ -229,7 +229,6 @@ Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 001
   (Go, Swagger em `http://127.0.0.1:8800/docs`) e
   [`protheus-manager-web`](https://github.com/rodrigomicrosiga-devops/protheus-manager-web) (tela em
   `http://127.0.0.1:8801`). Manifestos em [`base/protheus-manager.yaml`](base/protheus-manager.yaml) e
-  [`base/protheus-manager-web.yaml`](base/protheus-manager-web.yaml). Falta a Fase 3
-  (Jobs `worker`/`compile`/`upddistr`).
+  [`base/protheus-manager-web.yaml`](base/protheus-manager-web.yaml).
 
 
