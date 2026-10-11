@@ -1,7 +1,10 @@
 # PRÉVIA do protheus-manager-api, ao lado da produção -- NÃO faz parte de base/ (o Argo CD nunca a
 # toca) e é aplicada/removida À MÃO:
-#   kubectl apply -f scripts/manager-preview/protheus-manager-api-preview.yaml
-#   kubectl delete -f scripts/manager-preview/protheus-manager-api-preview.yaml     # destrutivo: do usuário
+#   CM=$(kubectl -n protheus-devops get cm -o name | grep -o 'postgres-config-[a-z0-9]*' | head -1)
+#   sed "s/name: postgres-config$/name: $CM/" scripts/manager-preview/protheus-manager-api-preview.yaml | kubectl apply -f -
+# (o Kustomize põe um sufixo de hash no ConfigMap postgres-config; um `kubectl apply` direto não o
+#  conhece -- sem o sed o pod fica em CreateContainerConfigError.)
+#   kubectl delete deploy/protheus-manager-api-preview svc/protheus-manager-api-preview-service -n protheus-devops   # destrutivo: do usuário
 #
 # Regras que este arquivo cumpre (cada uma nasceu de um erro real, ADR 0021):
 #  - MESMA ServiceAccount da produção: a validação mede o RBAC de verdade.
