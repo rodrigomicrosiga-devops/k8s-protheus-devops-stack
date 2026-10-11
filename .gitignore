@@ -22,3 +22,7 @@ scripts/sigaacd-client/go/sigaacd-client
 # Token da protheus-manager-api em texto puro (ADR 0019): só existe localmente, o que vai pro git é
 # base/manager-secret.sealed.yaml. Backup de verdade: base/manager-secret.env.gpg (cofre, ADR 0011).
 base/manager-secret.env
+
+# Material de trabalho local (orientação do assistente, ADRs, HANDOFF): não vai para o GitHub.
+/CLAUDE.md
+/docs/

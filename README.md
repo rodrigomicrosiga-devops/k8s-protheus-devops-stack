@@ -129,7 +129,7 @@ kubectl exec deployment/printer -n protheus-devops -- ls /mnt/printer_shared
 kubectl exec deployment/webagent -n protheus-devops -- ls /mnt/webagent_shared
 ```
 
-Esses três PVCs já têm consumidor: `base/appserver-core.yaml` (e `-rest`/`-telnet`) monta os três como somente-leitura em `/tmp/webapp_shared`, `/tmp/printer_shared` e `/tmp/webagent_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module`, `protheus_printer_volume` e `webagent_shared_module` dentro do `appserver_core`. O AppServer copia os arquivos do WebAgent para uma subpasta local (`webagent/`) e gera a seção `[WEBAGENT]` do `appserver.ini` com caminho relativo — ver `docs/adr/0014-webagent-sidecar-de-entrega.md`. (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais de AppServer — ver item 6 abaixo.)
+Esses três PVCs já têm consumidor: `base/appserver-core.yaml` (e `-rest`/`-telnet`) monta os três como somente-leitura em `/tmp/webapp_shared`, `/tmp/printer_shared` e `/tmp/webagent_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module`, `protheus_printer_volume` e `webagent_shared_module` dentro do `appserver_core`. O AppServer copia os arquivos do WebAgent para uma subpasta local (`webagent/`) e gera a seção `[WEBAGENT]` do `appserver.ini` com caminho relativo (decisão registrada na documentação interna do projeto). (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais de AppServer — ver item 6 abaixo.)
 
 6. AppServer (`core`/`rest`/`telnet`) e os seeds do RPO/system/systemload
 
@@ -153,7 +153,7 @@ o servidor também não negocia eco, então esses clientes duplicam visualmente 
 ou o equivalente em Go, [`scripts/sigaacd-client/go/`](scripts/sigaacd-client/go/), em vez disso —
 detalhe completo do porquê em [`scripts/sigaacd-client/README.md`](scripts/sigaacd-client/README.md).
 
-**Regra mais cara do projeto** (ver [`CLAUDE.md`](CLAUDE.md)): numa base genuinamente nova, `UPDDISTR`/`worker`/`compile` nunca rodam antes do usuário concluir o bootstrap manual (login inicial via SmartClient). Vale tanto para o Compose quanto para este cluster.
+**Regra mais cara do projeto** (regra interna do projeto): numa base genuinamente nova, `UPDDISTR`/`worker`/`compile` nunca rodam antes do usuário concluir o bootstrap manual (login inicial via SmartClient). Vale tanto para o Compose quanto para este cluster.
 
 7. Patches, compilação e atualização de dicionário sob demanda (`worker`/`compile`/`upddistr`)
 
@@ -165,7 +165,7 @@ Os três papéis do `run.sh` do Compose (linhas 148-215) foram portados para o c
 ./scripts/appserver-patch/run-job.sh upddistr  # atualização de dicionário (bootstrap já feito)
 ```
 
-Detalhe completo (onde depositar cada insumo, por que `upddistr` não confia no status do Job) em [`scripts/appserver-patch/README.md`](scripts/appserver-patch/README.md) e [`docs/adr/0009-fase-e-orquestracao-via-git-e-veredito-por-arquivo.md`](docs/adr/0009-fase-e-orquestracao-via-git-e-veredito-por-arquivo.md).
+Detalhe completo (onde depositar cada insumo, por que `upddistr` não confia no status do Job) em [`scripts/appserver-patch/README.md`](scripts/appserver-patch/README.md).
 
 8. Validar o TOTVS SmartView
 
@@ -183,7 +183,7 @@ A partir daí, a configuração da conexão com o dicionário de dados do Prothe
 
 Este repositório é o alvo de sincronização de um `Application` do Argo CD (sync automático + `selfHeal` + `prune`), que por sua vez é observado por um `ImageUpdater` (Argo CD Image Updater) rastreando por **digest** as imagens `dbaccess-dev`, `postgres-dev`, `license-dev`, `webapp-dev`, `printer-dev`, `webagent-dev`, `smartview-dev`, `appserver-dev` (uma entrada cobre core/rest/telnet — mesma imagem) e as 3 imagens de seed (`protheus-rpo-dev`, `protheus-system-dev`, `protheus-systemload-dev`) — a cada novo build publicado no Docker Hub sob a mesma tag fixa, o Image Updater detecta o novo digest, faz o patch do `Application` (write-back method `argocd`) e o Argo CD sincroniza automaticamente. `appserver-dev-worker` (usado só pelos Jobs `worker`/`compile`, fora do Kustomize) fica de fora de propósito — sem manifesto rastreado pelo Kustomize, a entrada ficaria inerte; a tag é atualizada manualmente nos dois Jobs quando necessário.
 
-**Autenticação no Docker Hub**: o Image Updater faz pull autenticado do Docker Hub (`config.registries` em `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml`, credencial num Secret `dockerhub-creds` no namespace `argocd`, nunca versionado). Achado em 2026-09-18: sob uso intenso (vários bumps na mesma sessão), o pull anônimo (sem essa credencial) esbarra no rate limit do Docker Hub e trava a resolução de TODAS as imagens acima até o limite liberar. Corrigido na mesma data — detalhe em `docs/HANDOFF.md` (backlog, item 4) e `docs/adr/0014-webagent-sidecar-de-entrega.md`.
+**Autenticação no Docker Hub**: o Image Updater faz pull autenticado do Docker Hub (`config.registries` em `scripts/cluster-bootstrap/helm-values/argocd-image-updater.yaml`, credencial num Secret `dockerhub-creds` no namespace `argocd`, nunca versionado). Achado em 2026-09-18: sob uso intenso (vários bumps na mesma sessão), o pull anônimo (sem essa credencial) esbarra no rate limit do Docker Hub e trava a resolução de TODAS as imagens acima até o limite liberar. Corrigido na mesma data — detalhe na documentação interna do projeto.
 
 Os manifestos desses dois recursos (`Application` e `ImageUpdater`) ficam versionados em [`argocd/`](argocd/), pois eles vivem no namespace `argocd` do cluster, fora do que o Kustomize em `base/` gerencia — sem isso, a integração entre o Argo CD e este repositório existiria apenas como estado vivo do cluster, sem nenhum registro em git.
 
@@ -218,24 +218,18 @@ Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 001
 
 ### 📜 Scripts e documentação auxiliar
 
-- [`docs/HANDOFF.md`](docs/HANDOFF.md) — estado vivo do projeto: onde a última sessão parou, backlog priorizado, regras operacionais já validadas (não reabrir sem motivo novo). Ponto de partida obrigatório antes de continuar qualquer trabalho.
-- [`docs/adr/`](docs/adr/) — decisões arquiteturais registradas (privilégios dos workloads, `Recreate` em hostPath, hooks idempotentes, `nodeAffinity` imutável, escopo só-Postgres, bind mount real dos nodes k3d, orquestração dos Jobs de patch via git, entre outras).
-- [`scripts/k3d-nodes/`](scripts/k3d-nodes/) — receita versionada para recriar o *container* de um node k3d já existente (`agent-0`/`server-0`) preservando os volumes nomeados e o bind mount real. Não recria o cluster do zero (rede + volumes novos) — ver item 3 do backlog em `docs/HANDOFF.md`.
+- [`scripts/k3d-nodes/`](scripts/k3d-nodes/) — receita versionada para recriar o *container* de um node k3d já existente (`agent-0`/`server-0`) preservando os volumes nomeados e o bind mount real. Não recria o cluster do zero (rede + volumes novos).
 - [`scripts/k3d-nodes/post-boot.sh`](scripts/k3d-nodes/post-boot.sh) + [`k3d-node-rshared.service`](scripts/k3d-nodes/k3d-node-rshared.service) — reaplica a propagação de mount `rshared` nos nodes a cada boot do host (sem isso o `node-exporter` e o `node-agent` do Velero quebram).
 - [`scripts/appserver-patch/`](scripts/appserver-patch/) — `run-job.sh worker|compile|upddistr`, ver seção 7 acima.
 - [`scripts/sigaacd-client/`](scripts/sigaacd-client/) — cliente telnet mínimo pro console
   `SIGAACD` (versões em Python e Go); clientes genéricos (PuTTY) não navegam o menu dele — ver
   seção 6 acima e o README do próprio diretório para o diagnóstico completo.
-- [`docs/prompts/`](docs/prompts/) — prompts reutilizáveis para atualizar versão de binário TOTVS num repo `docker-protheus-*` e sincronizar as tags resultantes no `docker-compose.yaml` do repo irmão `docker-protheus-devops-stack`.
 - **Protheus Manager** — operação do ambiente sem terminal, em dois repositórios próprios (privados no
   GitHub): [`protheus-manager-api`](https://github.com/rodrigomicrosiga-devops/protheus-manager-api)
   (Go, Swagger em `http://127.0.0.1:8800/docs`) e
   [`protheus-manager-web`](https://github.com/rodrigomicrosiga-devops/protheus-manager-web) (tela em
   `http://127.0.0.1:8801`). Manifestos em [`base/protheus-manager.yaml`](base/protheus-manager.yaml) e
-  [`base/protheus-manager-web.yaml`](base/protheus-manager-web.yaml). Desenho nos ADRs
-  [0019](docs/adr/0019-protheus-manager-desenho.md) (o manager), [0020](docs/adr/0020-protheus-manager-web-desenho.md)
-  (frontend) e [0021](docs/adr/0021-api-do-manager-em-go.md) (migração para Go). Falta a Fase 3
-  (Jobs `worker`/`compile`/`upddistr`) — ver `docs/HANDOFF.md`.
-- ADRs 0017 (portas padrão do Protheus em `127.0.0.1`) e 0018 (o Docker espera o disco de dados no boot).
+  [`base/protheus-manager-web.yaml`](base/protheus-manager-web.yaml). Falta a Fase 3
+  (Jobs `worker`/`compile`/`upddistr`).
 
 
