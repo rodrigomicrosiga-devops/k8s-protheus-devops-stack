@@ -1,8 +1,9 @@
 # protheus-manager-api (repo irmão protheus-manager-api, desenho no ADR 0019).
 # Fase 2: leitura + escrita de baixo risco. Cada permissão abaixo existe por UMA ação da
 # API e está comentada com ela -- a Role só cresce junto com a fase, nunca antes, e nunca
-# vira cluster-admin. Fase 3 (Jobs) vai pedir `jobs` create/delete aqui. Stateless: sem volume, então RollingUpdate padrão (diferente dos
-# componentes com hostPath, ver README "Estratégia de Rollout").
+# vira cluster-admin. Fase 3 (Jobs) vai pedir `jobs` create/delete aqui. Desde a auditoria durável (0.5.0, ADR 0023 §7) deixou de ser
+# stateless: tem um PV próprio para a trilha (protheus-manager-audit-pv) e por isso `Recreate`
+# (ADR 0002), como os demais componentes com volume local.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -106,6 +107,48 @@ roleRef:
   kind: Role
   name: protheus-manager-backups
 ---
+# Trilha de auditoria durável do manager (JSONL append-only, ADR 0023 §7). `local` + Retain +
+# nodeAffinity desde o nascimento (ADR 0004). O diretório PRECISA existir antes, com dono do
+# usuário do container (10001; fsGroup não age em volume local) -- passo do HOST, de quem opera:
+#   docker exec k3d-protheus-cluster-agent-0 sh -c 'mkdir -p /media/rodrigo/dados/k8s-volume/protheus-manager-audit && chown 10001:10001 /media/rodrigo/dados/k8s-volume/protheus-manager-audit && chmod 0700 /media/rodrigo/dados/k8s-volume/protheus-manager-audit'
+# Se o diretório não existir ou não estiver montado, a API responde 503 nas ações mutantes (falha
+# fechada) em vez de gravar no disco efêmero do container.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: protheus-manager-audit-pv
+spec:
+  storageClassName: local-path
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  local:
+    path: /media/rodrigo/dados/k8s-volume/protheus-manager-audit
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - k3d-protheus-cluster-agent-0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: protheus-manager-audit-pvc
+  namespace: protheus-devops
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: protheus-manager-audit-pv
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -113,6 +156,8 @@ metadata:
   namespace: protheus-devops
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: protheus-manager-api
@@ -120,6 +165,9 @@ spec:
     metadata:
       labels:
         app: protheus-manager-api
+      annotations:
+        # Velero: o volume da trilha entra no backup (opt-in por volume, como postgres-dumps).
+        backup.velero.io/backup-volumes: audit
     spec:
       serviceAccountName: protheus-manager
       securityContext:
@@ -138,6 +186,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: MANAGER_AUDIT_FILE
+              value: /data/audit/audit.jsonl
             - name: MANAGER_API_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -162,6 +212,9 @@ spec:
                 secretKeyRef:
                   name: postgres-secret
                   key: DB_PASS
+          volumeMounts:
+            - name: audit
+              mountPath: /data/audit
           readinessProbe:
             httpGet:
               path: /health
@@ -189,6 +242,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: audit
+          persistentVolumeClaim:
+            claimName: protheus-manager-audit-pvc
 ---
 # NodePort 30880 -> exposto em 127.0.0.1:8800 pelo serverlb (ADR 0017, ver
 # scripts/cluster-bootstrap/00-create-cluster.sh). Só loopback: nada na rede.
