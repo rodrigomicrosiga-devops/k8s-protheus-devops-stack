@@ -1,0 +1,23 @@
+# Unit systemd que reaplica o runtime dos nodes k3d a cada start de container
+# (ADR 0025). Complementa k3d-node-rshared.service (convergência no boot).
+#
+# Instalação (no host, uma vez):
+#   sudo install -m 0644 scripts/k3d-nodes/k3d-node-watch.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now k3d-node-watch.service
+[Unit]
+Description=Observa starts dos nodes k3d e reaplica rshared (protheus-cluster)
+After=docker.service k3d-node-rshared.service
+Requires=docker.service
+RequiresMountsFor=/media/rodrigo/dados
+
+[Service]
+Type=simple
+User=rodrigo
+Environment=KUBECONFIG=/home/rodrigo/.kube/config
+ExecStart=/media/rodrigo/dados/k8s-protheus-devops-stack/scripts/k3d-nodes/watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

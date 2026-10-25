@@ -1,45 +1,100 @@
 #!/usr/bin/env bash
-# Reaplica, a cada boot do host, o estado de runtime que os nodes k3d perdem
-# quando o Docker os reinicia. Idempotente -- pode rodar quantas vezes quiser.
+# Reaplica o estado de runtime que os nodes k3d perdem quando o Docker os
+# reinicia, e CONVERGE até os nodes estabilizarem. Idempotente.
 #
 # Por que existe: o container de node nasce com o mount raiz em propagação
-# `private`, e o Docker o recria assim a cada boot da máquina (não só quando
-# o node é recriado por script). Isso quebra qualquer workload que monte `/`
-# do node -- prometheus-node-exporter e o node-agent do Velero. Erro típico:
+# `private`, e o Docker o recria assim a cada (re)start -- no boot da máquina
+# e em qualquer restart posterior. Isso quebra qualquer workload que monte `/`
+# do node (prometheus-node-exporter, node-agent do Velero). Erro típico:
 #   path "/" is mounted on "/" but it is not a shared or slave mount
-# `scripts/cluster-bootstrap/01-fix-cgroupns.sh` já aplicava o fix, mas só
-# quando um node era RECRIADO; um simples reboot do host o desfazia (achado de
-# 2026-09-19, ver ADR 0013).
+# ADR 0013 (a causa) e ADR 0025 (por que aplicar UMA vez não basta: no boot o
+# agent-0 entra em loop de restart e cada restart nasce `private` de novo; e o
+# serverlb ficou 5 dias parado depois de um upgrade do Docker).
 #
-# Descobre os nodes pelo label que o próprio k3d grava (`k3d.role`), sem
-# hardcode de nome -- funciona também depois de um `k3d cluster create` novo.
+# Comportamento:
+#   1. descobre os nodes pelo label do k3d (sem hardcode de nome);
+#   2. religa o serverlb se estiver parado;
+#   3. aplica `rshared` e CONFIRMA lendo /proc/self/mountinfo do node;
+#   4. só termina quando todos os nodes ficaram STABLE_SECONDS seguidos com
+#      o mesmo StartedAt e `shared:` confirmado; senão sai com erro (a unit
+#      aparece em `systemctl --failed` em vez de "sucesso" falso).
 #
-# Uso: scripts/k3d-nodes/post-boot.sh   (ou via k3d-node-rshared.service)
+# Uso: scripts/k3d-nodes/post-boot.sh   (ou via k3d-node-rshared.service /
+#      k3d-node-watch.service)
 set -euo pipefail
 
+DOCKER="${DOCKER:-docker}"                          # sobrescrevível p/ teste com docker falso
 CLUSTER="${K3D_CLUSTER_NAME:-protheus-cluster}"
-WAIT_SECONDS="${POST_BOOT_WAIT_SECONDS:-120}"
+WAIT_SECONDS="${POST_BOOT_WAIT_SECONDS:-180}"       # teto total
+STABLE_SECONDS="${POST_BOOT_STABLE_SECONDS:-30}"    # janela sem mudança
+POLL_SECONDS="${POST_BOOT_POLL_SECONDS:-2}"
+
+list_nodes() {
+  "$DOCKER" ps --filter "label=k3d.cluster=${CLUSTER}" \
+    --format '{{.Names}} {{.Label "k3d.role"}}' 2>/dev/null \
+    | awk '$2=="server" || $2=="agent" {print $1}'
+}
+
+# `shared:` só aparece nos campos opcionais da linha do mount raiz.
+is_shared() {
+  "$DOCKER" exec "$1" sh -c 'grep -E "^[0-9]+ [0-9]+ [0-9:]+ / / " /proc/self/mountinfo' 2>/dev/null \
+    | grep -q ' shared:'
+}
+
+start_serverlb() {
+  local lb status
+  lb="$("$DOCKER" ps -a --filter "label=k3d.cluster=${CLUSTER}" \
+    --format '{{.Names}} {{.Label "k3d.role"}} {{.State}}' 2>/dev/null \
+    | awk '$2=="loadbalancer" && $3!="running" {print $1}')"
+  for c in $lb; do
+    echo "  ${c}: parado -- religando"
+    status=0
+    "$DOCKER" start "$c" >/dev/null || status=$?
+    [ "$status" -eq 0 ] || echo "  AVISO: não consegui religar ${c} (exit ${status})" >&2
+  done
+}
 
 echo "Aguardando o Docker listar os nodes de '${CLUSTER}'..."
-deadline=$((SECONDS + WAIT_SECONDS))
-nodes=""
+start=$SECONDS
+deadline=$((start + WAIT_SECONDS))
+last_sig=""
+stable_since=$SECONDS
+
 while [ "$SECONDS" -lt "$deadline" ]; do
-  nodes="$(docker ps --filter "label=k3d.cluster=${CLUSTER}" \
-    --format '{{.Names}} {{.Label "k3d.role"}}' 2>/dev/null \
-    | awk '$2=="server" || $2=="agent" {print $1}')"
-  [ -n "$nodes" ] && break
-  sleep 3
+  nodes="$(list_nodes || true)"
+  if [ -z "$nodes" ]; then
+    last_sig=""; stable_since=$SECONDS
+    sleep "$POLL_SECONDS"; continue
+  fi
+
+  start_serverlb
+
+  sig=""; all_shared=1
+  for node in $nodes; do
+    started="$("$DOCKER" inspect -f '{{.State.StartedAt}}' "$node" 2>/dev/null || echo '?')"
+    sig="${sig}${node}=${started};"
+    if ! is_shared "$node"; then
+      "$DOCKER" exec "$node" mount --make-rshared / 2>/dev/null || true
+      echo "  ${node}: aplicado rshared (StartedAt=${started})"
+      is_shared "$node" || all_shared=0
+    fi
+  done
+
+  # Mudou o conjunto/StartedAt (restart no meio) ou algum node sem shared:
+  # recomeça a janela de estabilidade.
+  if [ "$sig" != "$last_sig" ] || [ "$all_shared" -ne 1 ]; then
+    last_sig="$sig"; stable_since=$SECONDS
+  elif [ $((SECONDS - stable_since)) -ge "$STABLE_SECONDS" ]; then
+    for node in $nodes; do echo "  ${node}: rshared confirmado e estável há ${STABLE_SECONDS}s"; done
+    break
+  fi
+  sleep "$POLL_SECONDS"
 done
 
-if [ -z "$nodes" ]; then
-  echo "ERRO: nenhum node k3d do cluster '${CLUSTER}' em execução após ${WAIT_SECONDS}s." >&2
+if [ "$SECONDS" -ge "$deadline" ]; then
+  echo "ERRO: nodes de '${CLUSTER}' não estabilizaram em ${WAIT_SECONDS}s (rshared + StartedAt estável por ${STABLE_SECONDS}s)." >&2
   exit 1
 fi
-
-for node in $nodes; do
-  docker exec "$node" mount --make-rshared /
-  echo "  ${node}: mount raiz em rshared"
-done
 
 # Só recicla pods se o kubectl alcançar o cluster e algum node-exporter
 # estiver preso -- num boot normal o API server ainda pode estar subindo, e
