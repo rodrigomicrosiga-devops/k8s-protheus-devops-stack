@@ -69,7 +69,7 @@ spec:
         # carrega, sem risco de sobrescrever nada -- o emptyDir nasce vazio
         # a cada execução do Job.
         - name: seed-includes
-          image: rodrigomicrosiga/protheus-includes-dev:0.0.1
+          image: rodrigomicrosiga/protheus-includes-dev:0.0.2
           env:
             - name: TARGET_DIR
               value: /totvs/protheus/includes
