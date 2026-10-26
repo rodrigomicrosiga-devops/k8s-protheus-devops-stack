@@ -68,32 +68,10 @@ spec:
           manifestTargets:
             kustomize:
               name: rodrigomicrosiga/appserver-dev
-        # As 3 imagens de seed do AppServer (protheus-seed.yaml, Fase C). RPO tem uma única
-        # imagem por release (12.1.2510 = um RPO só, pra sempre) -- diferente de
-        # system/systemload, que recebem várias atualizações dentro do mesmo release. Rastrear
-        # via digest é seguro nos três: a tag fica fixa até o dev decidir subir de release
-        # (mudança deliberada no git), nunca pula sozinho pra um release novo.
-        - alias: protheus-rpo-seed
-          imageName: docker.io/rodrigomicrosiga/protheus-rpo-dev:12.1.2510
-          commonUpdateSettings:
-            updateStrategy: digest
-          manifestTargets:
-            kustomize:
-              name: rodrigomicrosiga/protheus-rpo-dev
-        - alias: protheus-system-seed
-          imageName: docker.io/rodrigomicrosiga/protheus-system-dev:12.1.2510
-          commonUpdateSettings:
-            updateStrategy: digest
-          manifestTargets:
-            kustomize:
-              name: rodrigomicrosiga/protheus-system-dev
-        - alias: protheus-systemload-seed
-          imageName: docker.io/rodrigomicrosiga/protheus-systemload-dev:12.1.2510
-          commonUpdateSettings:
-            updateStrategy: digest
-          manifestTargets:
-            kustomize:
-              name: rodrigomicrosiga/protheus-systemload-dev
+        # Os 3 seeds do AppServer (protheus-rpo-dev, protheus-system-dev, protheus-systemload-dev)
+        # NÃO são rastreados aqui, de propósito: a tag `12.1.2510` é a release e pode ser
+        # republicada com conteúdo novo (ADR 0026). O override de digest no Application fica
+        # congelado até uma troca deliberada (a imagem só muda no cluster por decisão explícita).
         - alias: protheus-manager-api
           imageName: docker.io/rodrigomicrosiga/protheus-manager-api-dev:0.5.0
           commonUpdateSettings:
