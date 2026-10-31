@@ -6,8 +6,9 @@ Ao marcar uma versão, `[Unreleased]` vira `[x.y.z] - data`.
 
 ## [Unreleased]
 
-### Added
-- (nada ainda)
+### Changed
+- Manifestos separados em `topology/` (48 objetos: tudo o que pertence a uma topologia Protheus), `cluster/` (15 objetos que existem uma vez só: Protheus Manager API/web e `regcred`) e `base/`, que passa a ser só a raiz que compõe as duas. A `Application` continua com `path: base`; o `kubectl kustomize base` ficou **byte a byte idêntico** (63 objetos).
+- `scripts/appserver-patch/run-job.sh` lê os Jobs de `topology/`.
 
 ## Baseline - 2026-10-31
 

@@ -30,7 +30,7 @@ if [ "$ROLE" != "worker" ] && [ "$ROLE" != "compile" ] && [ "$ROLE" != "upddistr
 fi
 
 JOB_NAME="appserver-${ROLE}"
-JOB_FILE="${REPO_ROOT}/base/appserver-${ROLE}-job.yaml"
+JOB_FILE="${REPO_ROOT}/topology/appserver-${ROLE}-job.yaml"
 JOB_TIMEOUT_SECONDS="${JOB_TIMEOUT_SECONDS:-900}"
 
 echo "=== Portão de segurança: bootstrap já concluído? ==="
@@ -59,7 +59,7 @@ if [ "$ROLE" = "upddistr" ]; then
   # (o sidecar manda SIGTERM no appsrvlinux, não é um shutdown limpo
   # garantido) -- o veredito real é o CONTEÚDO de Result.json/result.json,
   # lido direto do bind mount do host, mesmo critério do run.sh. Ver
-  # comentário completo em base/appserver-upddistr-job.yaml.
+  # comentário completo em topology/appserver-upddistr-job.yaml.
   echo "=== Limpando veredito anterior (Result.json/result.json) ==="
   remove_old_result_files
 

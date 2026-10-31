@@ -1,0 +1,10 @@
+# Singletons do CLUSTER: o Protheus Manager (API + web), o regcred e o que eles precisam. NAO se repetem por topologia.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # protheus-manager-api (ADR 0019, Fase 1): ServiceAccount de leitura + Deployment + Service.
+  - protheus-manager.yaml
+  - manager-secret.sealed.yaml
+  - protheus-manager-web.yaml
+  - regcred.sealed.yaml

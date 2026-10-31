@@ -1,42 +1,8 @@
+# Raiz que o Argo CD aplica (`path: base` na Application). Compoe as duas metades; os segredos em texto
+# (*.env, nunca versionados) e seus backups cifrados (*.env.gpg) continuam AQUI (scripts/secrets, ADR 0011).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 resources:
-  - namespace.yaml
-  - postgres.yaml
-  - dbaccess.yaml
-  - license.yaml
-  - webapp.yaml
-  - printer.yaml
-  - webagent.yaml
-  - protheus-seed.yaml
-  - smartview.yaml
-  - smartview-db-init-job.yaml
-  - postgres-secret.sealed.yaml
-  - smartview-secret.sealed.yaml
-  - regcred.sealed.yaml
-  - appserver-core.yaml
-  # Fase D (2026-09-17): core já validado em produção real, rest/telnet entram.
-  - appserver-rest.yaml
-  - appserver-telnet.yaml
-  # Fase E (2026-09-17): só os PVCs de staging e o secret entram aqui -- os
-  # Jobs (appserver-worker-job.yaml, appserver-compile-job.yaml,
-  # appserver-upddistr-job.yaml) ficam de fora de propósito, ver comentário
-  # no topo de cada um.
-  - protheus-patch-storage.yaml
-  - appserver-upddistr-secret.sealed.yaml
-  # protheus-manager-api (ADR 0019, Fase 1): ServiceAccount de leitura + Deployment + Service.
-  - protheus-manager.yaml
-  - manager-secret.sealed.yaml
-  - protheus-manager-web.yaml
-
-# Gerador dinâmico de ConfigMaps (variáveis comuns)
-configMapGenerator:
-  - name: postgres-config
-    namespace: protheus-devops
-    envs:
-      - postgres.env
-
-# postgres-secret agora vem de postgres-secret.sealed.yaml (Sealed Secrets),
-# não mais de um secretGenerator local — o segredo real nunca fica em texto no git.
-# Requer o controller bitnami/sealed-secrets instalado no cluster de destino.
+  - ../topology
+  - ../cluster
