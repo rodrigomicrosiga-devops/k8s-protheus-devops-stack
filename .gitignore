@@ -23,6 +23,10 @@ scripts/sigaacd-client/go/sigaacd-client
 # cluster/manager-secret.sealed.yaml. Backup de verdade: base/manager-secret.env.gpg (cofre, ADR 0011).
 base/manager-secret.env
 
+# Texto puro dos Secrets exportados para o cofre (ADR 0028): so existem efemeramente; o que vai pro git e o .gpg.
+base/smartview-secret.env
+base/appserver-upddistr-secret.env
+
 # Material de trabalho local (orientação do assistente, ADRs, HANDOFF): não vai para o GitHub.
 /CLAUDE.md
 /docs/

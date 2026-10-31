@@ -49,3 +49,18 @@ são algo que uma sessão automatizada consegue rodar sozinha sem um humano digi
 específicos do `postgres-secret.env`. Se `smartview-secret.env`/`appserver-upddistr-secret.env`
 (ou qualquer outro insumo de `kubeseal`) precisarem do mesmo tratamento no futuro, é só rodar
 `encrypt.sh` neles também, sem duplicar script.
+
+## Exportar para o cofre Secrets que só existem no cluster
+
+`smartview-secret` (`SV_PASS`) e `appserver-upddistr-secret` (`UPD_PASSWORD`) só existiam dentro do cluster, sem cópia cifrada no repo.
+`export-live-secrets.sh` lê esses Secrets e grava `base/<nome>.env.gpg`, no mesmo formato do `postgres-secret.env.gpg`.
+
+```sh
+scripts/secrets/export-live-secrets.sh          # confere (não lê nenhum valor): Secrets existem, destinos livres, texto puro no .gitignore
+! scripts/secrets/export-live-secrets.sh --run  # exporta; precisa de TTY (pinentry) e pede a passphrase do cofre algumas vezes
+```
+
+O que ele garante: o valor nunca vai para a tela, para argumento de comando nem para disco (só `tmpfs`, apagado ao sair); antes de ler qualquer coisa prova que a
+passphrase digitada abre `base/postgres-secret.env.gpg`; depois de cifrar, prova que o arquivo novo abre com ela e é idêntico ao original (por hash) — se não
+bater, remove o arquivo novo e o Secret segue intacto no cluster; recusa sobrescrever um `.gpg` existente. Teste: `scripts/secrets/test-export-live-secrets.sh`
+(`kubectl` e `gpg` falsos, nenhum segredo real).

@@ -6,6 +6,9 @@ Ao marcar uma versão, `[Unreleased]` vira `[x.y.z] - data`.
 
 ## [Unreleased]
 
+### Added
+- `scripts/secrets/export-live-secrets.sh` (+ teste): exporta para o cofre GPG os Secrets `smartview-secret` e `appserver-upddistr-secret`, que só existiam no cluster. Confere por padrão (sem ler valores); `--run` exige TTY, prova a passphrase do cofre antes de ler e confere o arquivo novo por hash. `.gitignore` cobre o texto puro correspondente.
+
 ### Changed
 - Manifestos separados em `topology/` (48 objetos: tudo o que pertence a uma topologia Protheus), `cluster/` (15 objetos que existem uma vez só: Protheus Manager API/web e `regcred`) e `base/`, que passa a ser só a raiz que compõe as duas. A `Application` continua com `path: base`; o `kubectl kustomize base` ficou **byte a byte idêntico** (63 objetos).
 - `scripts/appserver-patch/run-job.sh` lê os Jobs de `topology/`.
