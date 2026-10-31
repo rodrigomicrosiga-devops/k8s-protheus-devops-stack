@@ -64,3 +64,19 @@ O que ele garante: o valor nunca vai para a tela, para argumento de comando nem 
 passphrase digitada abre `base/postgres-secret.env.gpg`; depois de cifrar, prova que o arquivo novo abre com ela e é idêntico ao original (por hash) — se não
 bater, remove o arquivo novo e o Secret segue intacto no cluster; recusa sobrescrever um `.gpg` existente. Teste: `scripts/secrets/test-export-live-secrets.sh`
 (`kubectl` e `gpg` falsos, nenhum segredo real).
+
+## Selar os segredos de uma topologia nova
+
+O `SealedSecret` é escopo `strict` (nome + namespace): copiar o YAML para outro namespace não abre. `seal-topology.sh` sela de novo, a partir do cofre,
+para o namespace da topologia nova, e grava no catálogo privado (`$CATALOG_DIR`, padrão `../protheus-catalog`) em `topologies/<namespace>/`.
+
+```sh
+scripts/secrets/seal-topology.sh <namespace>                 # confere (não lê nenhum valor)
+! scripts/secrets/seal-topology.sh --run <namespace>         # sela; precisa de TTY (pinentry)
+! scripts/secrets/seal-topology.sh --run --with-upddistr <namespace>   # inclui o appserver-upddistr-secret (só após o bootstrap manual)
+```
+
+Sela `postgres-secret` e `smartview-secret`. O `regcred` não está no cofre e não é selado aqui. Garantias: o valor nunca vai para tela, argumento ou disco (só `tmpfs`);
+a passphrase é provada antes de ler; as chaves do cofre e as da saída têm de bater com as de `topology/<nome>.sealed.yaml`; recusa o namespace de produção e
+recusa sobrescrever; se um segredo falha, os já selados nesta execução são removidos. Teste: `scripts/secrets/test-seal-topology.sh` (`kubectl`, `gpg` e `kubeseal` falsos).
+
