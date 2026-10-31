@@ -1,4 +1,4 @@
-# Segredo real: nunca vai puro pro git (usar SealedSecret, ver base/postgres-secret.sealed.yaml).
+# Segredo real: nunca vai puro pro git (usar SealedSecret, ver topology/postgres-secret.sealed.yaml).
 # A cópia em texto puro só existe efemeramente no disco quando decriptada via
 # scripts/secrets/decrypt.sh -- o backup de verdade é base/postgres-secret.env.gpg (versionado,
 # ver docs/adr/0011-cofre-local-gpg-secrets-plaintext.md).
@@ -20,7 +20,7 @@ scripts/cluster-bootstrap/helm-values/*.yaml
 scripts/sigaacd-client/go/sigaacd-client
 
 # Token da protheus-manager-api em texto puro (ADR 0019): só existe localmente, o que vai pro git é
-# base/manager-secret.sealed.yaml. Backup de verdade: base/manager-secret.env.gpg (cofre, ADR 0011).
+# cluster/manager-secret.sealed.yaml. Backup de verdade: base/manager-secret.env.gpg (cofre, ADR 0011).
 base/manager-secret.env
 
 # Material de trabalho local (orientação do assistente, ADRs, HANDOFF): não vai para o GitHub.

@@ -23,8 +23,8 @@ O texto original do backlog (`docs/HANDOFF.md`) cogitava "hooks Argo CD PreSync/
    regra mais cara do projeto (`CLAUDE.md`) é que `worker`/`compile`/`upddistr` **nunca** rodam
    antes do bootstrap manual do AppServer estar completo. Um Job automático e recorrente é
    estruturalmente incompatível com essa regra. Por isso os três manifestos de Job
-   (`base/appserver-worker-job.yaml`, `base/appserver-compile-job.yaml`,
-   `base/appserver-upddistr-job.yaml`) ficam **fora** de `base/kustomization.yaml` — o Argo CD
+   (`topology/appserver-worker-job.yaml`, `topology/appserver-compile-job.yaml`,
+   `topology/appserver-upddistr-job.yaml`) ficam **fora** de `base/kustomization.yaml` — o Argo CD
    nunca os toca sozinho, só este script.
 
 ## Como usar
@@ -70,7 +70,7 @@ O script:
    20/09. Regra dura, não é opcional, sem `--force`.
 2. Captura quantas réplicas `appserver-core`/`-rest`/`-telnet` têm agora, faz `kubectl scale` pra
    0 só nos que estavam ativos e espera os pods sumirem de verdade (`scale` é assíncrono).
-3. Aplica o Job (`kubectl apply -f base/appserver-<role>-job.yaml`).
+3. Aplica o Job (`kubectl apply -f topology/appserver-<role>-job.yaml`).
    - `worker`/`compile`: espera o Job terminar e usa `status.succeeded`/`status.failed` como
      veredito (o exit code do container reflete o resultado real nesses dois papéis).
    - `upddistr`: **não confia no status do Job** (confirmado ao vivo que um `upddistr` que
@@ -94,7 +94,7 @@ O script:
   sidecar `result-watcher` (no mesmo Pod, `shareProcessNamespace: true`) mata o `appsrvlinux`
   assim que `Result.json`/`result.json` aparece. Credencial (`UPD_USER`/`UPD_PASSWORD`) definida
   no bootstrap manual do AppServer, sem default -- `UPD_PASSWORD` vem de
-  `base/appserver-upddistr-secret.sealed.yaml` (`kubeseal`), nunca literal no YAML.
+  `topology/appserver-upddistr-secret.sealed.yaml` (`kubeseal`), nunca literal no YAML.
 
 ## Privilégios
 

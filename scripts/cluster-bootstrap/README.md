@@ -17,7 +17,7 @@ para validar o próprio procedimento de disaster recovery.
 nunca um volume Docker gerenciado pelo k3d, então `k3d cluster delete` nunca toca nele.
 
 **O que não sobrevive, e por isso precisa de backup antes**: as chaves do `sealed-secrets`
-(sem elas, os `SealedSecret` já commitados em `base/*.sealed.yaml` ficam permanentemente
+(sem elas, os `SealedSecret` já commitados em `topology/*.sealed.yaml` e `cluster/*.sealed.yaml` ficam permanentemente
 indecifráveis) e os `values.yaml` dos componentes instalados via Helm fora do git (perdidos se
 não extraídos antes).
 

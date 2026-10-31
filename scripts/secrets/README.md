@@ -6,7 +6,7 @@ Resolve o item 2 do backlog ([`docs/HANDOFF.md`](../../docs/HANDOFF.md)).
 ## O problema que isto resolve
 
 `base/postgres-secret.env` é o insumo em texto plano usado pra gerar (via `kubeseal`)
-`base/postgres-secret.sealed.yaml`, o `SealedSecret` de verdade aplicado no cluster. Esse `.env`
+`topology/postgres-secret.sealed.yaml`, o `SealedSecret` de verdade aplicado no cluster. Esse `.env`
 nunca vai pro git (`.gitignore`), mas até 2026-09-18 só existia como arquivo puro no disco — sem
 backup nenhum fora dele. Perder o disco (ou o arquivo) significava perder a única cópia
 recuperável da senha, sem forma de re-selar o segredo (ex. pra rotacionar, ou pra um cluster

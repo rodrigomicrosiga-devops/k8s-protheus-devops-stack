@@ -1,6 +1,6 @@
 # ==============================================================================
 # Volumes de staging da Fase E (worker/compile) -- fila de .ptm e includes de
-# fonte customizado. Mesmo padrão de base/protheus-seed.yaml: hostPath fixado
+# fonte customizado. Mesmo padrão de topology/protheus-seed.yaml: hostPath fixado
 # no agent-0 via nodeAffinity, porque os dados reais vivem dentro do node (ver
 # docs/adr/0008-bind-mount-real-recriacao-isolada-dos-nodes.md).
 #
@@ -48,7 +48,7 @@ spec:
 # (ADVPL/TLPP) deixou de precisar de PV/PVC com hostPath -- agora é entregue
 # via initContainer efêmero (rodrigomicrosiga/protheus-includes-dev, repo
 # docker-protheus-includes) num emptyDir, direto em
-# base/appserver-compile-job.yaml. Conteúdo estático (não acumula estado
+# topology/appserver-compile-job.yaml. Conteúdo estático (não acumula estado
 # como o RPO), sem consumidor contínuo (só o compile Job) -- persistência
 # nunca foi necessária. Diretório antigo (/media/rodrigo/dados/k8s-volume/
 # protheus-includes/ no agent-0) fica órfão, não é limpo automaticamente.

@@ -1,7 +1,7 @@
 # AppServer "worker" -- aplica patches .ptm da fila (/totvs/protheus/patches_queue)
 # sobre o .rpo compartilhado. Papel efêmero (Fase E), NÃO um Deployment.
 #
-# DELIBERADAMENTE FORA de base/kustomization.yaml: este Job nunca deve ser
+# DELIBERADAMENTE FORA de topology/kustomization.yaml: este Job nunca deve ser
 # aplicado automaticamente pelo sync do Argo CD.
 #   1. (Histórico) até 2026-10-04 o selfHeal revertia qualquer scale-to-zero de
 #      core/rest/telnet feito por fora do git, então a parada era commit

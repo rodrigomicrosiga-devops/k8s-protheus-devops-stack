@@ -2,7 +2,7 @@
 # Instala o sealed-secrets controller e restaura as chaves de decriptação
 # antigas ANTES dele processar qualquer coisa com uma chave nova gerada por
 # conta própria -- essencial pra que os SealedSecret já commitados no git
-# (base/*.sealed.yaml) continuem decriptáveis no cluster novo.
+# (topology/*.sealed.yaml e cluster/*.sealed.yaml) continuem decriptáveis no cluster novo.
 #
 # Pré-requisito: scripts/cluster-bootstrap/sealed-secrets-keys-backup.yaml
 # precisa existir (decriptar primeiro: ../secrets/decrypt.sh
@@ -42,5 +42,5 @@ kubectl rollout status deployment "$DEPLOY" -n kube-system --timeout=60s
 echo
 echo "✅ sealed-secrets pronto com as chaves antigas restauradas."
 echo "👉 Validação real só é possível depois que argocd/application.yaml for aplicado e"
-echo "   sincronizar os SealedSecret de base/ -- confira depois que os Secrets reais"
+echo "   sincronizar os SealedSecret de topology/ e cluster/ -- confira depois que os Secrets reais"
 echo "   (regcred, postgres-secret, etc.) aparecem em protheus-devops sem erro."

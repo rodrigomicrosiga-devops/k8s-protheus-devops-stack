@@ -87,7 +87,7 @@ spec:
             kustomize:
               name: rodrigomicrosiga/protheus-manager-web-dev
         # appserver-dev-worker (Fase E: worker/compile prontos em 2026-09-17, ver
-        # base/appserver-worker-job.yaml e base/appserver-compile-job.yaml) continua de fora
+        # topology/appserver-worker-job.yaml e topology/appserver-compile-job.yaml) continua de fora
         # de propósito -- os dois Jobs existem, mas ficam deliberadamente FORA de
         # base/kustomization.yaml (nunca aplicados automaticamente pelo Argo CD, ver
         # comentário nos próprios arquivos). Sem entrar no Kustomize, não há manifesto

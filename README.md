@@ -83,7 +83,7 @@ O `cluster K3d` utiliza o `local-path provisioner` do K3s apontando para o volum
 
 Caminho: `/media/rodrigo/dados/`
 
-Os manifestos bases estão estruturados via Kustomize dentro do diretório `base/`.
+Os manifestos estão estruturados via Kustomize: `topology/` (tudo o que pertence a uma topologia Protheus), `cluster/` (o que existe uma vez só no cluster: o Protheus Manager e o `regcred`) e `base/`, a raiz que compõe as duas e que o Argo CD aplica.
 
 ### 🚀 Como Executar e Validar
 
@@ -129,11 +129,11 @@ kubectl exec deployment/printer -n protheus-devops -- ls /mnt/printer_shared
 kubectl exec deployment/webagent -n protheus-devops -- ls /mnt/webagent_shared
 ```
 
-Esses três PVCs já têm consumidor: `base/appserver-core.yaml` (e `-rest`/`-telnet`) monta os três como somente-leitura em `/tmp/webapp_shared`, `/tmp/printer_shared` e `/tmp/webagent_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module`, `protheus_printer_volume` e `webagent_shared_module` dentro do `appserver_core`. O AppServer copia os arquivos do WebAgent para uma subpasta local (`webagent/`) e gera a seção `[WEBAGENT]` do `appserver.ini` com caminho relativo (decisão registrada na documentação interna do projeto). (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais de AppServer — ver item 6 abaixo.)
+Esses três PVCs já têm consumidor: `topology/appserver-core.yaml` (e `-rest`/`-telnet`) monta os três como somente-leitura em `/tmp/webapp_shared`, `/tmp/printer_shared` e `/tmp/webagent_shared` — o mesmo caminho que o `docker-compose` original usava para `webapp_shared_module`, `protheus_printer_volume` e `webagent_shared_module` dentro do `appserver_core`. O AppServer copia os arquivos do WebAgent para uma subpasta local (`webagent/`) e gera a seção `[WEBAGENT]` do `appserver.ini` com caminho relativo (decisão registrada na documentação interna do projeto). (O antigo `base/appserver.yaml`, stub nunca funcional de 19/jul, foi removido e substituído pelos três manifestos reais de AppServer — ver item 6 abaixo.)
 
 6. AppServer (`core`/`rest`/`telnet`) e os seeds do RPO/system/systemload
 
-Antes do AppServer, os três seeds (`protheus-rpo-seed`, `protheus-system-seed`, `protheus-systemload-seed`, em `base/protheus-seed.yaml`) precisam ter provisionado os PVCs correspondentes — eles rodam em standby (`tail -f /dev/null` depois de provisionar), reagindo ao Image Updater por digest, não são Jobs. O `appserver-core` tem um `initContainer` (`wait-for-rpo`) que bloqueia a subida até o RPO estar de fato lá — protege contra ordem de subida errada.
+Antes do AppServer, os três seeds (`protheus-rpo-seed`, `protheus-system-seed`, `protheus-systemload-seed`, em `topology/protheus-seed.yaml`) precisam ter provisionado os PVCs correspondentes — eles rodam em standby (`tail -f /dev/null` depois de provisionar), reagindo ao Image Updater por digest, não são Jobs. O `appserver-core` tem um `initContainer` (`wait-for-rpo`) que bloqueia a subida até o RPO estar de fato lá — protege contra ordem de subida errada.
 
 ```bash
 kubectl get pods -n protheus-devops -l 'app in (protheus-rpo-seed,protheus-system-seed,protheus-systemload-seed,appserver-core,appserver-rest,appserver-telnet)'
@@ -157,7 +157,7 @@ detalhe completo do porquê em [`scripts/sigaacd-client/README.md`](scripts/siga
 
 7. Patches, compilação e atualização de dicionário sob demanda (`worker`/`compile`/`upddistr`)
 
-Os três papéis do `run.sh` do Compose (linhas 148-215) foram portados para o cluster como Jobs (`base/appserver-worker-job.yaml`, `-compile-job.yaml`, `-upddistr-job.yaml`), mas ficam **deliberadamente fora de `base/kustomization.yaml`** — o Argo CD nunca os toca sozinho (hooks `PreSync` re-rodam a cada sync, incompatível com a regra acima). São disparados só via script, que pausa `core`/`rest`/`telnet` (`kubectl scale` direto — a `Application` ignora `/spec/replicas` desde o ADR 0019, então o Argo CD não desfaz e nenhum commit é gerado), aplica o Job, espera o veredito e restaura o que estava ativo:
+Os três papéis do `run.sh` do Compose (linhas 148-215) foram portados para o cluster como Jobs (`topology/appserver-worker-job.yaml`, `-compile-job.yaml`, `-upddistr-job.yaml`), mas ficam **deliberadamente fora de `base/kustomization.yaml`** — o Argo CD nunca os toca sozinho (hooks `PreSync` re-rodam a cada sync, incompatível com a regra acima). São disparados só via script, que pausa `core`/`rest`/`telnet` (`kubectl scale` direto — a `Application` ignora `/spec/replicas` desde o ADR 0019, então o Argo CD não desfaz e nenhum commit é gerado), aplica o Job, espera o veredito e restaura o que estava ativo:
 
 ```bash
 ./scripts/appserver-patch/run-job.sh worker    # aplica .ptm depositado em protheus-patches/
@@ -229,7 +229,7 @@ Duas armadilhas do Velero neste cluster, ambas medidas e documentadas no ADR 001
   GitHub): [`protheus-manager-api`](https://github.com/rodrigomicrosiga-devops/protheus-manager-api)
   (Go, Swagger em `http://127.0.0.1:8800/docs`) e
   [`protheus-manager-web`](https://github.com/rodrigomicrosiga-devops/protheus-manager-web) (tela em
-  `http://127.0.0.1:8801`). Manifestos em [`base/protheus-manager.yaml`](base/protheus-manager.yaml) e
-  [`base/protheus-manager-web.yaml`](base/protheus-manager-web.yaml).
+  `http://127.0.0.1:8801`). Manifestos em [`cluster/protheus-manager.yaml`](cluster/protheus-manager.yaml) e
+  [`cluster/protheus-manager-web.yaml`](cluster/protheus-manager-web.yaml).
 
 

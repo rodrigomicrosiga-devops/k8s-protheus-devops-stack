@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR_LIB}/../.." && pwd)"
 # Node k3d onde os PVs hostPath estão fixados (nodeAffinity) -- usado pro
 # upddistr, cujo veredito de sucesso/falha vem do CONTEÚDO de um arquivo no
 # bind mount real (ADR 0008), não do status do Job (ver
-# base/appserver-upddistr-job.yaml pro raciocínio completo).
+# topology/appserver-upddistr-job.yaml pro raciocínio completo).
 K3D_AGENT_NODE="k3d-protheus-cluster-agent-0"
 SYSTEMLOAD_HOSTPATH="/media/rodrigo/dados/k8s-volume/protheus-systemload"
 

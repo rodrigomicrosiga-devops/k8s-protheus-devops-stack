@@ -6,7 +6,7 @@
 # tentado antes só pro smartview-secret e rejeitado: sem hook-delete-policy,
 # Argo CD assume BeforeHookCreation e deleta+recria o SealedSecret (e o Secret
 # junto, por ownerReferences) a cada sync -- medido ao vivo em 2026-09-20/21,
-# ver docs/adr/0016. O Deployment smartview (base/smartview.yaml) vai na wave 2,
+# ver docs/adr/0016. O Deployment smartview (topology/smartview.yaml) vai na wave 2,
 # depois deste Job já ter criado o banco/usuário dele.
 apiVersion: batch/v1
 kind: Job

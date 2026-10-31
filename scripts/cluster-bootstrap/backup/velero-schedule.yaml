@@ -3,7 +3,7 @@
 # O que entra:
 #   - namespace protheus-devops: objetos + dados dos 2 volumes anotados
 #     (postgres-dumps via hook de pg_dump, protheus-apo via rpo-seed) -- ver
-#     as anotações backup.velero.io/* em base/postgres.yaml e base/protheus-seed.yaml.
+#     as anotações backup.velero.io/* em topology/postgres.yaml e topology/protheus-seed.yaml.
 #   - namespace argocd: os overrides de digest do Image Updater vivem em
 #     Application.spec.source.kustomize.images (writeBackConfig: argocd), só no
 #     cluster, nunca no git -- é estado real, e o Secret dockerhub-creds.

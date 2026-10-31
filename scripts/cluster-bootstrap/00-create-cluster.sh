@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cria o cluster k3d "protheus-cluster" do zero (rede + nodes + volumes
 # nomeados novos). NÃO recria a topologia de dados existente -- isso é
-# reconstruído depois, pelos PVs com hostPath (ver base/*.yaml) apontando
+# reconstruído depois, pelos PVs com hostPath (ver topology/*.yaml) apontando
 # pro mesmo diretório físico do host, que sobrevive a este passo.
 #
 # Pré-requisito: nada do cluster antigo deve existir mais (rede, containers,
@@ -22,7 +22,7 @@ CLUSTER_NAME="protheus-cluster"
 K3D_IMAGE="rancher/k3s:v1.35.5-k3s1"
 APP_DATA_HOSTPATH="/media/rodrigo/dados/k8s-volume"
 
-# host:nodeport -- nodeport é o que os Services em base/*.yaml já fixam
+# host:nodeport -- nodeport é o que os Services em topology/*.yaml já fixam
 # (appserver-core/-rest/-telnet, dbaccess, license, smartview, postgres).
 # Porta de host == porta padrão do Protheus; só o NodePort intermediário
 # (30000-32767) é invisível por trás do serverlb.

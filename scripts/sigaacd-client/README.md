@@ -1,7 +1,7 @@
 # sigaacd-client — cliente telnet mínimo pro SIGAACD
 
 O `SIGAACD` é o console de administração do AppServer acessível via `appserver-telnet`
-(`base/appserver-telnet.yaml`, porta `23`/`1236`). Clientes telnet genéricos — testado com
+(`topology/appserver-telnet.yaml`, porta `23`/`1236`). Clientes telnet genéricos — testado com
 **PuTTY 0.81** — não conseguem navegar o menu dele. Duas implementações equivalentes deste
 diretório contornam isso — [`python/`](python/) (a original, usada pro diagnóstico) e
 [`go/`](go/) (binário único, sem depender de `python3` instalado). Mesma lógica, mesmo protocolo,

@@ -2,8 +2,8 @@
 # /totvs/protheus/patches_queue sobre o custom.rpo. Papel efêmero (Fase E),
 # NÃO um Deployment.
 #
-# DELIBERADAMENTE FORA de base/kustomization.yaml -- mesmo raciocínio de
-# base/appserver-worker-job.yaml (selfHeal reverteria scale manual; hooks
+# DELIBERADAMENTE FORA de topology/kustomization.yaml -- mesmo raciocínio de
+# topology/appserver-worker-job.yaml (selfHeal reverteria scale manual; hooks
 # re-rodam a cada sync e colidiriam com a regra de nunca rodar antes do
 # bootstrap manual). Ver aquele arquivo para o detalhe completo.
 #

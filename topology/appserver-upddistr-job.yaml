@@ -18,7 +18,7 @@
 # `grep -q "success"`), lido pelo run-job.sh diretamente do bind mount do
 # host, não do status do Job.
 #
-# DELIBERADAMENTE FORA de base/kustomization.yaml -- mesmo raciocínio de
+# DELIBERADAMENTE FORA de topology/kustomization.yaml -- mesmo raciocínio de
 # appserver-worker-job.yaml/appserver-compile-job.yaml (selfHeal reverteria
 # scale manual; hooks re-rodam a cada sync e colidiriam com a regra de nunca
 # rodar antes do bootstrap manual).
